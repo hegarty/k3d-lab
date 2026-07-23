@@ -1,0 +1,206 @@
+# OpenTelemetry Collector Helm values for k3d
+# Mode: daemonset (one collector per node) with a gateway collector deployment
+
+mode: daemonset
+
+# Image
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: "0.102.1"
+
+# Resources for each collector pod
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi
+
+# Configuration for the collector
+config:
+  receivers:
+    # Receive OTLP spans from applications
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+    # Prometheus metrics scraping
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: otel-collector
+            scrape_interval: 30s
+            static_configs:
+              - targets: ["0.0.0.0:8888"]
+
+    # Kubernetes container logs via kubeletstats
+    kubeletstats:
+      collection_interval: 30s
+      auth_type: serviceAccount
+      endpoint: "${env:K8S_NODE_NAME}:10250"
+      insecure_skip_verify: true
+      metric_groups:
+        - node
+        - pod
+        - container
+
+    # Kubernetes events
+    k8s_events:
+      namespaces: []  # empty = all namespaces
+
+    # Host metrics
+    hostmetrics:
+      collection_interval: 30s
+      scrapers:
+        cpu:
+          metrics:
+            system.cpu.utilization:
+              enabled: true
+        disk: {}
+        filesystem:
+          exclude_mount_points:
+            mount_points: [/dev, /proc, /sys, /run/k3s/containerd]
+            match_type: strict
+        load: {}
+        memory: {}
+        network: {}
+
+  processors:
+    # Batch processor — reduces network overhead
+    batch:
+      send_batch_size: 1000
+      timeout: 5s
+
+    # Memory limiter — prevent OOM
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 75
+      spike_limit_percentage: 25
+
+    # Resource detection — add host/pod metadata
+    resourcedetection:
+      detectors: [env, k8snode, docker]
+      timeout: 5s
+      override: false
+
+    # k8s attributes — enrich spans with pod labels/annotations
+    k8sattributes:
+      auth_type: serviceAccount
+      passthrough: false
+      extract:
+        metadata:
+          - k8s.pod.name
+          - k8s.pod.uid
+          - k8s.deployment.name
+          - k8s.namespace.name
+          - k8s.node.name
+          - k8s.pod.start_time
+        labels:
+          - tag_name: app
+            key: app
+            from: pod
+          - tag_name: version
+            key: version
+            from: pod
+      pod_association:
+        - sources:
+            - from: resource_attribute
+              name: k8s.pod.ip
+        - sources:
+            - from: connection
+
+  exporters:
+    # Send traces to Tempo
+    otlp/tempo:
+      endpoint: tempo.observability.svc.cluster.local:4317
+      tls:
+        insecure: true
+
+    # Send metrics to Prometheus (remote write)
+    prometheusremotewrite:
+      endpoint: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write
+      tls:
+        insecure: true
+
+    # Send logs to Loki
+    loki:
+      endpoint: http://loki-gateway.observability.svc.cluster.local:80/loki/api/v1/push
+      tls:
+        insecure: true
+
+    # Debug output (disable in production)
+    debug:
+      verbosity: basic
+
+  extensions:
+    health_check:
+      endpoint: 0.0.0.0:13133
+    pprof:
+      endpoint: 0.0.0.0:1777
+    zpages:
+      endpoint: 0.0.0.0:55679
+
+  service:
+    extensions: [health_check, pprof, zpages]
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, resourcedetection, k8sattributes, batch]
+        exporters: [otlp/tempo, debug]
+      metrics:
+        receivers: [otlp, prometheus, kubeletstats, hostmetrics]
+        processors: [memory_limiter, resourcedetection, k8sattributes, batch]
+        exporters: [prometheusremotewrite]
+      logs:
+        receivers: [otlp, k8s_events]
+        processors: [memory_limiter, resourcedetection, k8sattributes, batch]
+        exporters: [loki]
+
+# Service ports
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+  metrics:
+    enabled: true
+    containerPort: 8888
+    servicePort: 8888
+    protocol: TCP
+
+# Service Account with RBAC for k8s attribute enrichment
+serviceAccount:
+  create: true
+
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: [nodes, nodes/proxy, nodes/metrics, services, endpoints, pods, events]
+      verbs: [get, list, watch]
+    - apiGroups: [extensions, networking.k8s.io]
+      resources: [ingresses]
+      verbs: [get, list, watch]
+    - nonResourceURLs: [/metrics, /metrics/cadvisor]
+      verbs: [get]
+
+# Pod environment variables
+extraEnvs:
+  - name: K8S_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+
+# Tolerate all nodes (including control plane)
+tolerations:
+  - operator: Exists

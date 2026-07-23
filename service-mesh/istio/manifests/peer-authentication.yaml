@@ -1,0 +1,22 @@
+# peer-authentication.yaml — enforce mTLS STRICT mode across the mesh
+# Apply this after Istio is installed and all workloads have sidecar injection enabled.
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+---
+# Allow permissive mode in specific namespaces during migration
+# Remove this once all services have sidecars injected
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: permissive-during-migration
+  namespace: kube-system
+spec:
+  mtls:
+    mode: PERMISSIVE

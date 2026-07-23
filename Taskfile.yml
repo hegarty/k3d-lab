@@ -1,0 +1,246 @@
+version: "3"
+
+dotenv:
+  - .env
+  - versions.env
+
+vars:
+  CLUSTER_PROFILE: '{{.CLUSTER_PROFILE | default "single-node"}}'
+  CLUSTER_NAME: '{{.CLUSTER_NAME | default "k3d-lab"}}'
+  REPO_ROOT:
+    sh: pwd
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  ##############################################################################
+  # Cluster Lifecycle
+  ##############################################################################
+
+  prerequisites:
+    desc: Check all prerequisites are installed and configured
+    cmds:
+      - bash bootstrap/prerequisites.sh
+
+  up:
+    desc: Create cluster and install core stack
+    deps: [prerequisites]
+    cmds:
+      - CLUSTER_PROFILE={{.CLUSTER_PROFILE}} CLUSTER_NAME={{.CLUSTER_NAME}} bash bootstrap/install.sh
+
+  down:
+    desc: Destroy the k3d cluster
+    cmds:
+      - bash bootstrap/uninstall.sh
+
+  reset:
+    desc: Destroy and recreate the cluster
+    cmds:
+      - bash bootstrap/reset.sh
+
+  ##############################################################################
+  # Validation
+  ##############################################################################
+
+  validate:
+    desc: Run cluster validation checks
+    cmds:
+      - bash bootstrap/validate.sh
+
+  status:
+    desc: Show cluster info and component status
+    cmds:
+      - bash scripts/cluster-info.sh
+
+  doctor:
+    desc: Run environment doctor
+    cmds:
+      - bash scripts/doctor.sh
+
+  ##############################################################################
+  # Networking
+  ##############################################################################
+
+  cilium:install:
+    desc: Install Cilium CNI
+    cmds:
+      - bash networking/cilium/install.sh
+
+  cilium:uninstall:
+    desc: Uninstall Cilium
+    cmds:
+      - bash networking/cilium/uninstall.sh
+
+  gateway-api:install:
+    desc: Install Gateway API CRDs and resources
+    cmds:
+      - bash networking/gateway-api/install.sh
+
+  metallb:install:
+    desc: Install MetalLB (optional LoadBalancer)
+    cmds:
+      - bash networking/metallb/install.sh
+
+  ##############################################################################
+  # Observability
+  ##############################################################################
+
+  observability:install:
+    desc: Install full observability stack
+    cmds:
+      - task: prometheus:install
+      - task: loki:install
+      - task: tempo:install
+      - task: otel:install
+
+  prometheus:install:
+    desc: Install kube-prometheus-stack
+    cmds:
+      - bash observability/kube-prometheus-stack/install.sh
+
+  loki:install:
+    desc: Install Loki
+    cmds:
+      - bash observability/loki/install.sh
+
+  tempo:install:
+    desc: Install Tempo
+    cmds:
+      - bash observability/tempo/install.sh
+
+  otel:install:
+    desc: Install OpenTelemetry Collector
+    cmds:
+      - bash observability/opentelemetry/install.sh
+
+  grafana:
+    desc: Port-forward Grafana to localhost:3000
+    cmds:
+      - kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
+
+  prometheus:ui:
+    desc: Port-forward Prometheus to localhost:9090
+    cmds:
+      - kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+
+  ##############################################################################
+  # Security
+  ##############################################################################
+
+  security:install:
+    desc: Install security stack (cert-manager, kyverno, external-secrets)
+    cmds:
+      - task: cert-manager:install
+      - task: kyverno:install
+      - task: external-secrets:install
+
+  cert-manager:install:
+    desc: Install cert-manager
+    cmds:
+      - bash security/cert-manager/install.sh
+
+  kyverno:install:
+    desc: Install Kyverno policy engine
+    cmds:
+      - bash security/kyverno/install.sh
+
+  external-secrets:install:
+    desc: Install External Secrets Operator
+    cmds:
+      - bash security/external-secrets/install.sh
+
+  ##############################################################################
+  # Service Mesh
+  ##############################################################################
+
+  istio:install:
+    desc: Install Istio service mesh (optional)
+    cmds:
+      - bash service-mesh/istio/install.sh
+
+  istio:uninstall:
+    desc: Uninstall Istio
+    cmds:
+      - bash service-mesh/istio/uninstall.sh
+
+  ##############################################################################
+  # Ingress
+  ##############################################################################
+
+  nginx:install:
+    desc: Install NGINX ingress controller (optional)
+    cmds:
+      - bash ingress/nginx/install.sh
+
+  ##############################################################################
+  # Workloads
+  ##############################################################################
+
+  hello-world:
+    desc: Deploy hello-world workload
+    cmds:
+      - bash workloads/hello-world/install.sh
+
+  otel-demo:
+    desc: Deploy OpenTelemetry demo app
+    cmds:
+      - kubectl apply -f workloads/otel-demo/namespace.yaml
+      - kubectl apply -f workloads/otel-demo/otel-demo.yaml
+
+  ##############################################################################
+  # Tests
+  ##############################################################################
+
+  test:smoke:
+    desc: Run smoke tests
+    cmds:
+      - bash tests/smoke/run.sh
+
+  test:networking:
+    desc: Run networking tests
+    cmds:
+      - bash tests/networking/run.sh
+
+  test:observability:
+    desc: Run observability tests
+    cmds:
+      - bash tests/observability/run.sh
+
+  test:security:
+    desc: Run security policy tests
+    cmds:
+      - bash tests/security/run.sh
+
+  test:all:
+    desc: Run all tests
+    cmds:
+      - task: test:smoke
+      - task: test:networking
+      - task: test:observability
+      - task: test:security
+
+  ##############################################################################
+  # Utilities
+  ##############################################################################
+
+  chmod:
+    desc: Make all scripts executable
+    cmds:
+      - find . -name "*.sh" -exec chmod +x {} \;
+      - echo "All scripts are now executable"
+
+  lint:
+    desc: Bash syntax check all scripts
+    cmds:
+      - |
+        find . -name "*.sh" | while read f; do
+          bash -n "$f" && echo "OK: $f" || echo "FAIL: $f"
+        done
+
+  hubble:
+    desc: Port-forward Hubble UI to localhost:12000
+    cmds:
+      - kubectl port-forward -n kube-system svc/hubble-ui 12000:80

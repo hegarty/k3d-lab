@@ -1,0 +1,85 @@
+# require-non-root.yaml — require containers to run as non-root user
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root-user
+  annotations:
+    policies.kyverno.io/title: Require Non-Root User
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Running containers as root is a security risk. This policy requires that
+      all containers set runAsNonRoot=true OR set runAsUser to a non-zero UID.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - cert-manager
+                - cilium-test
+      validate:
+        message: >-
+          Containers must not run as root. Set securityContext.runAsNonRoot=true
+          or securityContext.runAsUser to a non-zero value.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.securityContext.runAsNonRoot || false }}"
+                    operator: NotEquals
+                    value: true
+                  - key: "{{ element.securityContext.runAsUser || 0 }}"
+                    operator: Equals
+                    value: 0
+---
+# Mutation policy — add runAsNonRoot if not set (informational mode)
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-securitycontext
+  annotations:
+    policies.kyverno.io/title: Add Default SecurityContext
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Adds default security context settings to pods that don't have them set,
+      including allowPrivilegeEscalation=false and readOnlyRootFilesystem=false
+      (as a best-effort default).
+spec:
+  background: false
+  rules:
+    - name: add-allowprivilegeescalation-false
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - (name): "{{ element.name }}"
+                    securityContext:
+                      +(allowPrivilegeEscalation): false

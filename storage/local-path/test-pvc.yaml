@@ -1,0 +1,16 @@
+# test-pvc.yaml — test PersistentVolumeClaim for local-path provisioner validation
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-path-test-pvc
+  namespace: default
+  labels:
+    app: local-path-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Mi

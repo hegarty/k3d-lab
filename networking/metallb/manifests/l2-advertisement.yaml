@@ -1,0 +1,12 @@
+# l2-advertisement.yaml — MetalLB Layer 2 advertisement configuration
+# L2 mode is the simplest mode for k3d — uses ARP to announce IPs.
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: k3d-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - k3d-pool
+  # Advertise on all interfaces (default when interfaces is omitted)

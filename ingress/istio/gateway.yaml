@@ -1,0 +1,28 @@
+# gateway.yaml — Istio ingress gateway configuration
+# This creates a Gateway resource that routes external traffic into the mesh.
+---
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: k3d-lab-ingress
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*.localhost"
+        - "localhost"
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: k3d-tls
+      hosts:
+        - "*.localhost"

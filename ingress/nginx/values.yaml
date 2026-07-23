@@ -1,0 +1,76 @@
+# NGINX Ingress Controller Helm values for k3d
+# Used when INGRESS_PROVIDER=nginx
+
+controller:
+  # Use HostNetwork so the NGINX pod can bind to the host ports mapped by k3d
+  kind: DaemonSet
+  hostNetwork: false
+
+  # Service type — ClusterIP to use k3d port-mapping
+  service:
+    type: NodePort
+    nodePorts:
+      http: 80
+      https: 443
+
+  # Resource limits for k3d
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Prometheus metrics
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false  # Enable once kube-prometheus-stack is installed
+
+  # Pod annotations for Prometheus scraping
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "10254"
+
+  # Config for NGINX
+  config:
+    # Enable access logs with timing info
+    log-format-upstream: >-
+      $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent
+      "$http_referer" "$http_user_agent" $request_time $upstream_response_time
+    # Increase body size for API calls
+    proxy-body-size: "50m"
+    # Enable CORS
+    enable-cors: "false"
+    # Gzip compression
+    use-gzip: "true"
+    gzip-level: "5"
+    # OpenTelemetry tracing
+    enable-opentelemetry: "false"
+
+  # Ingress class
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: false  # Don't make nginx the default — Cilium Gateway API is default
+
+  # Tolerate control plane nodes in single-node setup
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+
+# Default backend
+defaultBackend:
+  enabled: true
+  resources:
+    requests:
+      cpu: 5m
+      memory: 16Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi

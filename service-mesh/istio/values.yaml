@@ -1,0 +1,64 @@
+# Istio base Helm values for k3d
+# These values apply to all Istio components (base, istiod, gateway).
+# Sized conservatively for local development.
+
+# Global Istio settings
+global:
+  # Use a minimal profile for k3d to save resources
+  proxy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 40Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    # Readiness probe settings
+    readinessInitialDelaySeconds: 5
+    readinessPeriodSeconds: 5
+
+  # Pilot (istiod) discovery settings
+  proxy_init:
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 10m
+        memory: 10Mi
+
+  # Tracing — send to Tempo in observability namespace
+  tracer:
+    zipkin:
+      address: tempo-distributor.observability.svc.cluster.local:9411
+
+# Mesh config — applied to the MeshConfig resource
+meshConfig:
+  # Access log format
+  accessLogFile: "/dev/stdout"
+  accessLogFormat: |
+    [%START_TIME%] "%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%"
+    %RESPONSE_CODE% %RESPONSE_FLAGS% %BYTES_RECEIVED% %BYTES_SENT%
+    %DURATION% "%REQ(X-FORWARDED-FOR)%" "%REQ(USER-AGENT)%"
+    "%REQ(X-REQUEST-ID)%" "%REQ(:AUTHORITY)%" "%UPSTREAM_HOST%"
+
+  # Enable Zipkin tracing
+  enableTracing: true
+  defaultConfig:
+    tracing:
+      zipkin:
+        address: tempo-distributor.observability.svc.cluster.local:9411
+    # Propagate B3 headers for compatibility with Jaeger/Tempo
+    proxyMetadata:
+      BOOTSTRAP_XDS_AGENT: "true"
+
+  # mTLS settings — STRICT enforced via PeerAuthentication
+  outboundTrafficPolicy:
+    mode: ALLOW_ANY
+
+  # Telemetry v2 (Prometheus metrics)
+  extensionProviders:
+    - name: otel-tracing
+      opentelemetry:
+        service: otel-collector.observability.svc.cluster.local
+        port: 4317

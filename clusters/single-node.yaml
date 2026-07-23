@@ -1,0 +1,44 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: k3d-lab
+servers: 1
+agents: 0
+image: rancher/k3s:v1.30.2-k3s2
+network: k3d-network
+
+options:
+  k3d:
+    wait: true
+    timeout: "120s"
+  k3s:
+    extraArgs:
+      - arg: "--disable=traefik"
+        nodeFilters:
+          - "server:*"
+      - arg: "--disable=servicelb"
+        nodeFilters:
+          - "server:*"
+      - arg: "--disable-network-policy"
+        nodeFilters:
+          - "server:*"
+      - arg: "--flannel-backend=none"
+        nodeFilters:
+          - "server:*"
+      - arg: "--disable-kube-proxy"
+        nodeFilters:
+          - "server:*"
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true
+
+ports:
+  - port: "8080:80"
+    nodeFilters:
+      - "server:0"
+  - port: "8443:443"
+    nodeFilters:
+      - "server:0"
+  - port: "9090:9090"
+    nodeFilters:
+      - "server:0"

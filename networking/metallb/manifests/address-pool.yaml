@@ -1,0 +1,17 @@
+# address-pool.yaml — MetalLB IP address pool for k3d
+# The CIDR here should match a range within the Docker network k3d uses.
+# k3d typically uses 172.18.0.0/16 or 172.19.0.0/16.
+# Run: docker network inspect k3d-network | jq '.[0].IPAM.Config'
+# to find the exact CIDR, then pick a small slice at the high end.
+#
+# Default below assumes 172.18.0.0/16 with pool at 172.18.100.200-172.18.100.250
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: k3d-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.18.100.200-172.18.100.250
+  autoAssign: true

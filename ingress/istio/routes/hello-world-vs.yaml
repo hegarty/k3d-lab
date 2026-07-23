@@ -1,0 +1,31 @@
+# hello-world-vs.yaml — Istio VirtualService for hello-world workload
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: hello-world
+  namespace: hello-world
+spec:
+  hosts:
+    - "hello-world.localhost"
+    - "hello.localhost"
+  gateways:
+    - istio-system/k3d-lab-ingress
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: hello-world.hello-world.svc.cluster.local
+            port:
+              number: 8080
+      headers:
+        response:
+          add:
+            x-served-by: istio-k3d-lab
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: gateway-error,connect-failure,retriable-4xx

@@ -1,0 +1,49 @@
+# namespace-to-namespace.yaml — example policy allowing traffic between specific namespaces
+# This demonstrates how to permit cross-namespace communication
+# when default-deny is in effect.
+---
+# Allow observability namespace to scrape metrics from all namespaces
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-from-observability
+  namespace: hello-world
+spec:
+  description: "Allow Prometheus in observability namespace to scrape metrics"
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: observability
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Allow hello-world to reach its backend services
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: hello-world-egress
+  namespace: hello-world
+spec:
+  description: "Allow hello-world pods egress to cluster services and internet"
+  endpointSelector:
+    matchLabels:
+      app: hello-world
+  egress:
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+    # kube-apiserver
+    - toEntities:
+        - "kube-apiserver"
+    # Same namespace
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: hello-world
