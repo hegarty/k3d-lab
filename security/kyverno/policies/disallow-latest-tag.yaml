@@ -1,0 +1,76 @@
+# disallow-latest-tag.yaml — prevent use of ':latest' or missing image tags
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/minversion: "1.6.0"
+    policies.kyverno.io/description: >-
+      The ':latest' tag is mutable and can cause unexpected behavior in production.
+      This policy prevents container images from using ':latest' or missing tags
+      (which default to latest). Pin images to specific digest or version tags.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - cert-manager
+      validate:
+        message: >-
+          Image '{{ element.image }}' uses ':latest' tag or has no tag.
+          Pin your image to a specific version or digest.
+          Example: nginx:1.27.0-alpine instead of nginx:latest.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: Equals
+                    value: "*:latest"
+                  - key: "{{ element.image }}"
+                    operator: NotMatch
+                    value: "*:*"
+    - name: require-image-tag-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - cert-manager
+      validate:
+        message: >-
+          Init container image '{{ element.image }}' uses ':latest' or has no tag.
+        foreach:
+          - list: "request.object.spec.initContainers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: Equals
+                    value: "*:latest"
+                  - key: "{{ element.image }}"
+                    operator: NotMatch
+                    value: "*:*"

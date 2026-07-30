@@ -1,0 +1,73 @@
+# Tempo Helm values for k3d
+# Using monolithic (single binary) mode for local development.
+
+tempo:
+  # Repository and tag match Tempo chart version 1.10.x
+  repository: grafana/tempo
+  tag: "2.5.0"
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  # Receiver configuration — accept spans from multiple protocols
+  receivers:
+    jaeger:
+      protocols:
+        thrift_http:
+          endpoint: "0.0.0.0:14268"
+        grpc:
+          endpoint: "0.0.0.0:14250"
+    zipkin:
+      endpoint: "0.0.0.0:9411"
+    otlp:
+      protocols:
+        http:
+          endpoint: "0.0.0.0:4318"
+        grpc:
+          endpoint: "0.0.0.0:4317"
+
+  # Query frontend
+  querier:
+    frontend_worker:
+      frontend_address: localhost:9095
+
+  metrics_generator:
+    enabled: true
+    storage:
+      path: /var/tempo/generator/wal
+      remote_write:
+        - url: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write
+          send_exemplars: true
+
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+
+# Persistence
+persistence:
+  enabled: true
+  storageClassName: local-path
+  size: 5Gi
+
+# Service monitor for Prometheus
+serviceMonitor:
+  enabled: false  # Enable once kube-prometheus-stack is installed
+
+# Grafana datasource config (for reference — datasource is configured in grafana values)
+reportingEnabled: false

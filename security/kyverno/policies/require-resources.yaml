@@ -1,0 +1,56 @@
+# require-resources.yaml — require CPU and memory requests and limits on all containers
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod, Container
+    policies.kyverno.io/description: >-
+      Resource requests and limits are required to ensure fair scheduling and
+      prevent resource starvation. This policy requires all containers to specify
+      CPU and memory requests and limits.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-requests-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - cert-manager
+      validate:
+        message: >-
+          CPU and memory resource requests and limits are required.
+          Set spec.containers[*].resources.requests.cpu,
+          spec.containers[*].resources.requests.memory,
+          spec.containers[*].resources.limits.cpu, and
+          spec.containers[*].resources.limits.memory.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.resources.requests.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.requests.memory || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.memory || '' }}"
+                    operator: Equals
+                    value: ""

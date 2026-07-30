@@ -1,0 +1,31 @@
+# fake-store.yaml — ClusterSecretStore using the Fake provider
+# The Fake provider returns pre-configured data without connecting to an external backend.
+# Useful for local development and testing External Secrets without AWS/Vault/etc.
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: fake-store
+  annotations:
+    description: "Fake provider for local development — returns pre-configured values"
+spec:
+  provider:
+    fake:
+      data:
+        # Database credentials
+        - key: "/local/database/password"
+          value: "super-secret-local-db-password"
+          version: "v1"
+        - key: "/local/database/username"
+          value: "app_user"
+          version: "v1"
+        # API keys
+        - key: "/local/api/key"
+          value: "local-dev-api-key-12345"
+          version: "v1"
+        # Generic secret
+        - key: "/local/app/config"
+          valueMap:
+            database_url: "postgres://app_user:password@postgres:5432/appdb"
+            redis_url: "redis://redis:6379"
+            app_secret: "local-app-secret-key"

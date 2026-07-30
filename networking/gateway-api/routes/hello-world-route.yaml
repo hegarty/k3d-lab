@@ -1,0 +1,29 @@
+# hello-world-route.yaml — HTTPRoute for the hello-world workload
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hello-world
+  namespace: hello-world
+spec:
+  parentRefs:
+    - name: k3d-gateway
+      namespace: kube-system
+      sectionName: http
+  hostnames:
+    - "hello-world.localhost"
+    - "hello.localhost"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: hello-world
+          port: 8080
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            add:
+              - name: X-Served-By
+                value: k3d-lab

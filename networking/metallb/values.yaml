@@ -1,0 +1,39 @@
+# MetalLB Helm values for k3d
+# MetalLB provides LoadBalancer services in environments without a cloud provider.
+# In k3d, this allows services of type LoadBalancer to get a real IP from the Docker network.
+
+# Speaker runs on all nodes to handle ARP/BGP announcements
+speaker:
+  tolerateMaster: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+
+# Controller manages IP allocation
+controller:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+
+# Prometheus integration
+prometheus:
+  serviceAccount: ""
+  namespace: ""
+  podMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+
+# PSP (disabled for k3s 1.25+)
+psp:
+  create: false

@@ -1,0 +1,210 @@
+# kube-prometheus-stack Helm values for k3d
+# Sized for local development — reduces resource consumption significantly.
+
+# Grafana
+grafana:
+  enabled: true
+  replicas: 1
+
+  adminUser: admin
+  adminPassword: prom-operator
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+
+  # Persistence — use local-path provisioner
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 2Gi
+
+  # Grafana datasources — pre-configured for Loki and Tempo
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki-gateway.observability.svc.cluster.local:80
+      access: proxy
+      isDefault: false
+      jsonData:
+        maxLines: 1000
+    - name: Tempo
+      type: tempo
+      url: http://tempo-query-frontend.observability.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: "-1h"
+          spanEndTimeShift: "1h"
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+
+  # Grafana plugins
+  plugins:
+    - grafana-piechart-panel
+    - grafana-worldmap-panel
+
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+      searchNamespace: ALL
+
+# Prometheus
+prometheus:
+  enabled: true
+
+  prometheusSpec:
+    replicas: 1
+    retention: 7d
+    retentionSize: "5GB"
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    # Scrape everything in all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+
+    # Additional scrape configs for Cilium Hubble metrics
+    additionalScrapeConfigs:
+      - job_name: cilium-agent
+        honor_labels: true
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [kube-system]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_k8s_app]
+            regex: cilium
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "$1:9962"
+      - job_name: cilium-operator
+        honor_labels: true
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [kube-system]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            regex: cilium-operator
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "$1:9963"
+
+# AlertManager
+alertmanager:
+  enabled: true
+
+  alertmanagerSpec:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+# Prometheus Operator
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# kube-state-metrics
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# node-exporter
+nodeExporter:
+  enabled: true
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# Default scraping intervals
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false         # k3s doesn't expose etcd metrics by default
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubeControllerManager: false  # not directly accessible in k3s
+    kubelet: true
+    kubeProxy: false              # disabled (using Cilium)
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeSchedulerAlerting: false  # not directly accessible in k3s
+    kubeSchedulerRecording: false
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true

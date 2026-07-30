@@ -1,0 +1,11 @@
+# ca-issuer.yaml — ClusterIssuer backed by the self-signed CA
+# This issues all workload certificates in the cluster.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: k3d-lab-ca-issuer
+spec:
+  ca:
+    # References the CA secret created by selfsigned-issuer.yaml
+    secretName: k3d-lab-ca-secret

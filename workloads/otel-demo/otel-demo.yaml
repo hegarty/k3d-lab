@@ -1,0 +1,192 @@
+# otel-demo.yaml — OpenTelemetry Demo application
+# This is a minimal subset of the CNCF OpenTelemetry Astronomy Shop demo.
+# For the full demo, use the official Helm chart:
+#   helm install my-otel-demo open-telemetry/opentelemetry-demo
+#
+# This file deploys:
+#   - productcatalog service (Go, emits traces)
+#   - frontend service (Next.js, emits traces)
+#   - An HTTPRoute to expose the frontend
+---
+# ProductCatalog Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: productcatalogservice
+  namespace: otel-demo
+  labels:
+    app: productcatalogservice
+    app.kubernetes.io/name: productcatalogservice
+    app.kubernetes.io/version: "0.9.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: productcatalogservice
+  template:
+    metadata:
+      labels:
+        app: productcatalogservice
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9001"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: productcatalogservice
+          image: ghcr.io/open-telemetry/demo:1.10.0-productcatalogservice
+          ports:
+            - containerPort: 8080
+              name: grpc
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: productcatalogservice
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-gateway.observability.svc.cluster.local:4317"
+            - name: PRODUCT_CATALOG_PORT
+              value: "8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            grpc:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            grpc:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: productcatalogservice
+  namespace: otel-demo
+spec:
+  selector:
+    app: productcatalogservice
+  ports:
+    - name: grpc
+      port: 8080
+      targetPort: 8080
+---
+# Frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: otel-demo
+  labels:
+    app: frontend
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/version: "1.10.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: ghcr.io/open-telemetry/demo:1.10.0-frontend
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: frontend
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-gateway.observability.svc.cluster.local:4317"
+            - name: PRODUCT_CATALOG_SERVICE_ADDR
+              value: "productcatalogservice:8080"
+            - name: FRONTEND_PORT
+              value: "8080"
+            - name: PUBLIC_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://otel-gateway.observability.svc.cluster.local:4318/v1/traces"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: otel-demo
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# HTTPRoute to expose the frontend
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: otel-demo-frontend
+  namespace: otel-demo
+spec:
+  parentRefs:
+    - name: k3d-gateway
+      namespace: kube-system
+      sectionName: http
+  hostnames:
+    - "otel-demo.localhost"
+    - "shop.localhost"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend
+          port: 8080

@@ -1,0 +1,33 @@
+# gateway.yaml — Shared Gateway for the k3d-lab cluster
+# This Gateway is managed by Cilium and provides both HTTP and HTTPS listeners.
+# All HTTPRoutes/GRPCRoutes in the cluster can attach to this Gateway.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: k3d-gateway
+  namespace: kube-system
+  annotations:
+    # Request a specific NodePort to align with the k3d port mapping (8080 → 80)
+    # Cilium will provision the underlying service
+    service.beta.kubernetes.io/aws-load-balancer-type: "none"
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: k3d-tls
+            namespace: kube-system
+      allowedRoutes:
+        namespaces:
+          from: All

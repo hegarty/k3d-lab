@@ -1,0 +1,29 @@
+# storage-class.yaml — Local Path Provisioner StorageClass
+# k3s bundles the Local Path Provisioner with a default StorageClass named "local-path".
+# This file documents the StorageClass and provides an alternative configuration.
+---
+# The default storage class bundled with k3s
+# Reference only — k3s creates this automatically.
+# Uncomment and apply if you need a custom configuration.
+#
+# apiVersion: storage.k8s.io/v1
+# kind: StorageClass
+# metadata:
+#   name: local-path
+#   annotations:
+#     storageclass.kubernetes.io/is-default-class: "true"
+# provisioner: rancher.io/local-path
+# volumeBindingMode: WaitForFirstConsumer
+# reclaimPolicy: Delete
+
+# A non-default storage class with Retain policy (for keeping data after PVC deletion)
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path-retain
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain

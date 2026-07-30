@@ -1,0 +1,115 @@
+# Cilium Helm values for k3d
+# k8sServiceHost and k8sServicePort are injected via --set in install.sh
+# because the Docker network IP is dynamic per cluster.
+
+# Tunnel mode — safest for k3d on macOS/Linux
+tunnel: "vxlan"
+
+# IPAM — use Kubernetes-managed IP ranges (from k3s)
+ipam:
+  mode: "kubernetes"
+
+# kube-proxy replacement — full replacement (k3s started with --disable-kube-proxy)
+kubeProxyReplacement: true
+
+# BPF masquerade for pod-to-external traffic
+bpf:
+  masquerade: true
+
+# Socket-level load balancing (part of kube-proxy replacement)
+socketLB:
+  enabled: true
+
+# NodePort support via Cilium
+nodePort:
+  enabled: true
+
+# ExternalIP support
+externalIPs:
+  enabled: true
+
+# HostPort support
+hostPort:
+  enabled: true
+
+# Node init — disabled for k3d/k3s.
+# k3d node containers don't have bash, so nsenter-based node-init fails.
+# k3d mounts /sys/fs/bpf automatically; no host-level init is needed.
+nodeinit:
+  enabled: false
+
+# Operator
+operator:
+  replicas: 1
+  prometheus:
+    enabled: true
+
+# Prometheus metrics from Cilium agent
+prometheus:
+  enabled: true
+  serviceMonitor:
+    # Enable only if kube-prometheus-stack is installed
+    enabled: false
+
+# Hubble observability platform
+hubble:
+  enabled: true
+
+  # Hubble Relay — aggregates flows from all nodes
+  relay:
+    enabled: true
+    replicas: 1
+
+  # Hubble UI — web interface for flow visualization
+  ui:
+    enabled: true
+    replicas: 1
+
+  # Hubble metrics exposed to Prometheus
+  metrics:
+    enabled:
+      - dns:query;ignoreAAAA
+      - drop
+      - tcp
+      - flow
+      - icmp
+      - http
+
+  # TLS for Hubble relay
+  tls:
+    auto:
+      enabled: true
+      method: helm
+
+# Gateway API integration — Cilium acts as the Gateway API controller
+gatewayAPI:
+  enabled: true
+
+# Security groups / identity allocation
+identityAllocationMode: "crd"
+
+# Cluster identity
+# Note: Cilium 1.15 forbids cluster-id != 0 when name is "default".
+# Use id: 0 for a single non-clustermesh cluster.
+cluster:
+  name: "k3d-lab"
+  id: 0
+
+# Resources for the Cilium agent — sized for k3d dev
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+# Operator resources
+operator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi

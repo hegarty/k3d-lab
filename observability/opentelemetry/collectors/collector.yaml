@@ -1,0 +1,147 @@
+# collector.yaml — OpenTelemetry Collector in gateway mode
+# This is a centralized aggregation point that receives from all DaemonSet collectors
+# and exports to the backends (Tempo, Loki, Prometheus).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway-config
+  namespace: observability
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        send_batch_size: 5000
+        timeout: 10s
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+    exporters:
+      otlp/tempo:
+        endpoint: tempo.observability.svc.cluster.local:4317
+        tls:
+          insecure: true
+      prometheusremotewrite:
+        endpoint: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write
+        tls:
+          insecure: true
+      loki:
+        endpoint: http://loki-gateway.observability.svc.cluster.local:80/loki/api/v1/push
+        tls:
+          insecure: true
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp/tempo]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheusremotewrite]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [loki]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-gateway
+  namespace: observability
+  labels:
+    app: otel-gateway
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/component: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-gateway
+  template:
+    metadata:
+      labels:
+        app: otel-gateway
+        app.kubernetes.io/name: otel-gateway
+    spec:
+      containers:
+        - name: collector
+          image: otel/opentelemetry-collector-contrib:0.102.1
+          args:
+            - --config=/conf/collector.yaml
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+              protocol: TCP
+            - containerPort: 4318
+              name: otlp-http
+              protocol: TCP
+            - containerPort: 13133
+              name: health
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: otel-gateway-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway
+  namespace: observability
+  labels:
+    app: otel-gateway
+spec:
+  selector:
+    app: otel-gateway
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: health
+      port: 13133
+      targetPort: 13133
+      protocol: TCP

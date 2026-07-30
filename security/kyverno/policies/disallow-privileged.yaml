@@ -1,0 +1,89 @@
+# disallow-privileged.yaml — block privileged containers and hostPID/hostIPC/hostNetwork
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Privileged containers share namespaces with the underlying host and do not
+      provide container isolation. This policy prevents the creation of privileged
+      containers. hostPID, hostIPC, and hostNetwork access is also blocked.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: disallow-privileged
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - cilium-test
+      validate:
+        message: "Privileged containers are not allowed."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+            initContainers:
+              - =(securityContext):
+                  =(privileged): "false"
+    - name: disallow-host-pid
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+      validate:
+        message: "hostPID is not allowed."
+        pattern:
+          spec:
+            =(hostPID): "false"
+    - name: disallow-host-ipc
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+      validate:
+        message: "hostIPC is not allowed."
+        pattern:
+          spec:
+            =(hostIPC): "false"
+    - name: disallow-host-network
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+      validate:
+        message: "hostNetwork is not allowed."
+        pattern:
+          spec:
+            =(hostNetwork): "false"

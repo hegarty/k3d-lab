@@ -1,0 +1,48 @@
+# test-certificate.yaml — test Certificate to verify cert-manager is working
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-certificate
+  namespace: default
+spec:
+  secretName: test-tls
+  duration: 2160h   # 90 days
+  renewBefore: 360h # 15 days
+  commonName: test.localhost
+  dnsNames:
+    - test.localhost
+    - "*.test.localhost"
+  issuerRef:
+    name: k3d-lab-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+---
+# Wildcard certificate for all .localhost services
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: k3d-wildcard
+  namespace: kube-system
+spec:
+  secretName: k3d-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: "*.localhost"
+  dnsNames:
+    - "localhost"
+    - "*.localhost"
+    - "hello-world.localhost"
+    - "grafana.localhost"
+    - "prometheus.localhost"
+    - "hubble.localhost"
+  issuerRef:
+    name: k3d-lab-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  privateKey:
+    algorithm: ECDSA
+    size: 256

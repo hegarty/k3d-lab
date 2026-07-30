@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hello-world
+  labels:
+    app.kubernetes.io/name: hello-world
+    app.kubernetes.io/part-of: k3d-lab
+    # Enable Istio sidecar injection if using Istio
+    # istio-injection: enabled

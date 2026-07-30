@@ -1,0 +1,22 @@
+# allow-dns.yaml — allow all pods to reach CoreDNS for DNS resolution
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterWideNetworkPolicy
+metadata:
+  name: allow-dns-egress
+spec:
+  description: "Allow all pods to reach CoreDNS for DNS resolution"
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"

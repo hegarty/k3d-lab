@@ -1,0 +1,58 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: market-dev
+servers: 1
+agents: 2
+image: rancher/k3s:v1.30.2-k3s2
+network: k3d-market-network
+
+registries:
+  create:
+    name: market-registry
+    host: "0.0.0.0"
+    hostPort: "5000"
+  config: |
+    mirrors:
+      "market-registry.localhost:5000":
+        endpoint:
+          - http://market-registry:5000
+
+options:
+  k3d:
+    wait: true
+    timeout: "300s"
+  k3s:
+    extraArgs:
+      - arg: "--disable=traefik"
+        nodeFilters:
+          - "server:*"
+      - arg: "--disable=servicelb"
+        nodeFilters:
+          - "server:*"
+      - arg: "--disable-network-policy"
+        nodeFilters:
+          - "server:*"
+      - arg: "--flannel-backend=none"
+        nodeFilters:
+          - "server:*"
+      - arg: "--disable-kube-proxy"
+        nodeFilters:
+          - "server:*"
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true
+
+ports:
+  - port: "8280:80"
+    nodeFilters:
+      - "server:0"
+  - port: "8643:443"
+    nodeFilters:
+      - "server:0"
+  - port: "16686:16686"
+    nodeFilters:
+      - "server:0"
+  - port: "3000:3000"
+    nodeFilters:
+      - "server:0"

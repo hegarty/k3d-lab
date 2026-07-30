@@ -1,0 +1,33 @@
+# default-deny.yaml — deny all ingress and egress by default (zero-trust baseline)
+# Apply this to enforce strict network segmentation.
+# After applying, you must explicitly allow traffic with CiliumNetworkPolicy or NetworkPolicy.
+#
+# WARNING: This blocks ALL pod-to-pod communication including DNS until allow-dns.yaml is applied.
+# Apply allow-dns.yaml FIRST, then this policy.
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterWideNetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  description: "Default deny all ingress and egress for all pods cluster-wide"
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - "host"
+        - "remote-node"
+  egress:
+    - toEntities:
+        - "host"
+        - "remote-node"
+    # Allow DNS (UDP 53 to kube-dns)
+    - toEndpoints:
+        - matchLabels:
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"

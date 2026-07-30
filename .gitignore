@@ -1,0 +1,17 @@
+.env
+*.tfstate
+*.tfstate.backup
+.terraform/
+**/.terraform/
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+kubeconfig
+kubeconfig-*
+/tmp/
+*.tmp
+.task/
+node_modules/
+charts/
+*.tgz

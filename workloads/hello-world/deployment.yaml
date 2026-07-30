@@ -1,0 +1,85 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+  namespace: hello-world
+  labels:
+    app: hello-world
+    app.kubernetes.io/name: hello-world
+    app.kubernetes.io/version: "1.10.3"
+    app.kubernetes.io/part-of: k3d-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+        app.kubernetes.io/name: hello-world
+        app.kubernetes.io/version: "1.10.3"
+      annotations:
+        prometheus.io/scrape: "false"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534  # nobody
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: whoami
+          # traefik/whoami — responds to any HTTP request with request info
+          # includes /health endpoint for liveness/readiness probes
+          image: traefik/whoami:v1.10.3
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: WHOAMI_NAME
+              value: "k3d-lab hello-world"
+            - name: WHOAMI_PORT_NUMBER
+              value: "8080"
+          args:
+            - --port=8080
+            - --name=k3d-lab
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: hello-world
