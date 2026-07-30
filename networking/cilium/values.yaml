@@ -32,9 +32,11 @@ externalIPs:
 hostPort:
   enabled: true
 
-# Node init — needed for k3d to set up eBPF mounts
+# Node init — disabled for k3d/k3s.
+# k3d node containers don't have bash, so nsenter-based node-init fails.
+# k3d mounts /sys/fs/bpf automatically; no host-level init is needed.
 nodeinit:
-  enabled: true
+  enabled: false
 
 # Operator
 operator:
@@ -87,9 +89,11 @@ gatewayAPI:
 identityAllocationMode: "crd"
 
 # Cluster identity
+# Note: Cilium 1.15 forbids cluster-id != 0 when name is "default".
+# Use id: 0 for a single non-clustermesh cluster.
 cluster:
-  name: "default"
-  id: 1
+  name: "k3d-lab"
+  id: 0
 
 # Resources for the Cilium agent — sized for k3d dev
 resources:

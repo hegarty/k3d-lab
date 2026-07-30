@@ -1,9 +1,17 @@
 .PHONY: help up down reset status validate \
-        cilium-install gateway-api-install \
-        observability-install security-install \
+        bootstrap-minimal bootstrap-platform bootstrap-market \
+        cluster-create cluster-delete cluster-reset cluster-info \
+        cilium-install cilium-uninstall cilium-status cilium-test \
+        gateway-api-install \
+        metallb-install metallb-uninstall \
+        observability-install observability-uninstall \
+        security-install security-uninstall \
+        istio-install istio-uninstall istio-status \
+        storage-install storage-test \
+        workloads-install workloads-uninstall \
         hello-world-install \
-        test-smoke test-networking test-observability test-security \
-        doctor prerequisites
+        test-smoke test-networking test-observability test-security test-all \
+        doctor prerequisites clean
 
 SHELL := /usr/bin/env bash
 REPO_ROOT := $(shell pwd)
@@ -22,13 +30,36 @@ help: ## Show this help
 
 ##@ Cluster Lifecycle
 
-up: prerequisites ## Create cluster and install core stack
+up: prerequisites ## Create cluster and install core stack (alias: bootstrap-minimal)
 	@CLUSTER_PROFILE=$(CLUSTER_PROFILE) CLUSTER_NAME=$(CLUSTER_NAME) bash bootstrap/install.sh
 
-down: ## Destroy the cluster
+bootstrap-minimal: prerequisites ## Bootstrap minimal cluster (Cilium + Gateway API + hello-world)
+	@CLUSTER_PROFILE=$(PROFILE) CLUSTER_NAME=$(CLUSTER_NAME) bash bootstrap/install.sh
+
+bootstrap-platform: prerequisites ## Bootstrap platform cluster with observability and security
+	@INSTALL_OBSERVABILITY=true INSTALL_SECURITY=true \
+	 CLUSTER_PROFILE=$(PROFILE) CLUSTER_NAME=$(CLUSTER_NAME) bash bootstrap/install.sh
+
+bootstrap-market: prerequisites ## Bootstrap full market-dev cluster
+	@INSTALL_OBSERVABILITY=true INSTALL_SECURITY=true \
+	 CLUSTER_PROFILE=$(PROFILE) CLUSTER_NAME=$(CLUSTER_NAME) bash bootstrap/install.sh
+
+cluster-create: prerequisites ## Create cluster only (no components)
+	@k3d cluster create --config clusters/$(PROFILE).yaml
+
+cluster-delete: ## Delete cluster by name
+	@k3d cluster delete $(CLUSTER_NAME)
+
+cluster-reset: ## Destroy and recreate the cluster
+	@bash bootstrap/reset.sh
+
+cluster-info: ## Show cluster info and access URLs
+	@bash scripts/cluster-info.sh
+
+down: ## Destroy the cluster (alias: cluster-delete)
 	@bash bootstrap/uninstall.sh
 
-reset: ## Destroy and recreate the cluster
+reset: ## Destroy and recreate the cluster (alias: cluster-reset)
 	@bash bootstrap/reset.sh
 
 prerequisites: ## Check prerequisites
@@ -53,11 +84,20 @@ cilium-install: ## Install Cilium CNI
 cilium-uninstall: ## Uninstall Cilium
 	@bash networking/cilium/uninstall.sh
 
+cilium-status: ## Show Cilium status
+	@cilium status || kubectl -n kube-system rollout status daemonset/cilium
+
+cilium-test: ## Run Cilium connectivity test (takes ~5-10 min)
+	@CILIUM_CONNECTIVITY_TEST=true cilium connectivity test
+
 gateway-api-install: ## Install Gateway API CRDs and resources
 	@bash networking/gateway-api/install.sh
 
 metallb-install: ## Install MetalLB (optional)
 	@bash networking/metallb/install.sh
+
+metallb-uninstall: ## Uninstall MetalLB
+	@helm uninstall metallb -n metallb-system 2>/dev/null || true
 
 ##@ Observability
 
@@ -66,6 +106,12 @@ observability-install: ## Install full observability stack
 	@bash observability/loki/install.sh
 	@bash observability/tempo/install.sh
 	@bash observability/opentelemetry/install.sh
+
+observability-uninstall: ## Uninstall observability stack
+	@helm uninstall kube-prometheus-stack -n observability 2>/dev/null || true
+	@helm uninstall loki -n observability 2>/dev/null || true
+	@helm uninstall tempo -n observability 2>/dev/null || true
+	@helm uninstall opentelemetry-collector -n observability 2>/dev/null || true
 
 prometheus-install: ## Install kube-prometheus-stack only
 	@bash observability/kube-prometheus-stack/install.sh
@@ -86,6 +132,11 @@ security-install: ## Install security stack (cert-manager, kyverno, external-sec
 	@bash security/kyverno/install.sh
 	@bash security/external-secrets/install.sh
 
+security-uninstall: ## Uninstall security stack
+	@helm uninstall cert-manager -n cert-manager 2>/dev/null || true
+	@helm uninstall kyverno -n kyverno 2>/dev/null || true
+	@helm uninstall external-secrets -n external-secrets 2>/dev/null || true
+
 cert-manager-install: ## Install cert-manager
 	@bash security/cert-manager/install.sh
 
@@ -102,6 +153,29 @@ istio-install: ## Install Istio (optional)
 
 istio-uninstall: ## Uninstall Istio
 	@bash service-mesh/istio/uninstall.sh
+
+istio-status: ## Show Istio status
+	@istioctl version 2>/dev/null || kubectl -n istio-system get pods
+
+storage-install: ## Apply local-path StorageClass and run test PVC
+	@kubectl apply -f storage/local-path/storage-class.yaml
+
+storage-test: ## Run storage persistence test
+	@kubectl apply -f storage/local-path/test-pvc.yaml
+	@kubectl apply -f storage/local-path/test-pod.yaml
+	@kubectl wait pod/storage-test --for=condition=Ready --timeout=60s 2>/dev/null || true
+	@kubectl get pvc,pod -l app=storage-test
+
+workloads-install: ## Deploy all workloads
+	@bash workloads/hello-world/install.sh
+	@kubectl apply -f workloads/network-test/namespace.yaml
+	@kubectl apply -f workloads/network-test/test-pods.yaml
+
+workloads-uninstall: ## Remove all workloads
+	@kubectl delete namespace hello-world network-test 2>/dev/null || true
+
+clean: ## Remove cluster and all local artifacts (does NOT prune Docker)
+	@bash bootstrap/uninstall.sh
 
 ##@ Ingress
 

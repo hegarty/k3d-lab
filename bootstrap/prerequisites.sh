@@ -2,7 +2,9 @@
 # prerequisites.sh — verify all required tools are installed and Docker is ready
 set -Eeuo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "${REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 # shellcheck source=scripts/common.sh
 source "${REPO_ROOT}/scripts/common.sh"
 load_env

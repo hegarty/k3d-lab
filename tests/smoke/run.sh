@@ -2,7 +2,9 @@
 # smoke/run.sh — basic cluster health smoke tests
 set -Eeuo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -z "${REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 # shellcheck source=scripts/common.sh
 source "${REPO_ROOT}/scripts/common.sh"
 load_env
@@ -13,8 +15,9 @@ CONTEXT="k3d-${CLUSTER_NAME}"
 PASS=0
 FAIL=0
 
-t_pass() { ok "PASS: $1"; (( PASS++ )) || true; }
-t_fail() { err "FAIL: $1"; (( FAIL++ )) || true; }
+# Use plain variables rather than (( expr )) to avoid exit-code issues under set -e
+t_pass() { ok "PASS: $1"; PASS=$(( PASS + 1 )); }
+t_fail() { err "FAIL: $1"; FAIL=$(( FAIL + 1 )); }
 K() { kubectl --context="${CONTEXT}" "$@"; }
 
 section "Smoke Tests — Cluster: ${CLUSTER_NAME}"
@@ -32,7 +35,9 @@ fi
 ##############################################################################
 # Test: all nodes are Ready
 ##############################################################################
-not_ready=$(K get nodes --no-headers | grep -c "NotReady" || echo 0)
+# Use grep -c with || true so pipefail does not fire when grep finds nothing
+not_ready=$(K get nodes --no-headers 2>/dev/null | { grep -c "NotReady" || true; })
+not_ready="${not_ready:-0}"
 if [[ "${not_ready}" -eq 0 ]]; then
   t_pass "All nodes are Ready"
 else
@@ -43,7 +48,8 @@ fi
 # Test: CoreDNS is running
 ##############################################################################
 coredns=$(K get pods -n kube-system -l k8s-app=kube-dns \
-  --field-selector=status.phase=Running --no-headers | wc -l | tr -d ' ')
+  --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
+coredns="${coredns:-0}"
 if [[ "${coredns}" -ge 1 ]]; then
   t_pass "CoreDNS: ${coredns} pod(s) running"
 else
@@ -57,6 +63,8 @@ cilium_ready=$(K get ds -n kube-system cilium \
   -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)
 cilium_desired=$(K get ds -n kube-system cilium \
   -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo 0)
+cilium_ready="${cilium_ready:-0}"
+cilium_desired="${cilium_desired:-0}"
 if [[ "${cilium_ready}" -eq "${cilium_desired}" ]] && [[ "${cilium_ready}" -ge 1 ]]; then
   t_pass "Cilium: ${cilium_ready}/${cilium_desired} pods ready"
 else
@@ -70,17 +78,18 @@ hw_ready=$(K get deployment -n hello-world hello-world \
   -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
 hw_desired=$(K get deployment -n hello-world hello-world \
   -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
-if [[ "${hw_ready:-0}" -ge 1 ]]; then
+hw_ready="${hw_ready:-0}"
+hw_desired="${hw_desired:-0}"
+if [[ "${hw_ready}" -ge 1 ]]; then
   t_pass "hello-world: ${hw_ready}/${hw_desired} replicas ready"
 else
-  t_fail "hello-world: not ready (${hw_ready:-0}/${hw_desired:-0})"
+  t_fail "hello-world: not ready (${hw_ready}/${hw_desired})"
 fi
 
 ##############################################################################
 # Test: hello-world service responds via port-forward
 ##############################################################################
 log "Testing hello-world HTTP response via port-forward..."
-# Start port-forward in background
 kubectl --context="${CONTEXT}" port-forward -n hello-world svc/hello-world 18080:8080 &>/dev/null &
 PF_PID=$!
 sleep 3
@@ -136,8 +145,9 @@ EOF
 sleep 3
 PVC_STATUS=$(K get pvc "${PVC_NAME}" -n default \
   -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+PVC_STATUS="${PVC_STATUS:-Unknown}"
 
-# PVC may be Pending (WaitForFirstConsumer) or Bound
+# PVC may be Pending (WaitForFirstConsumer) or Bound — both are acceptable
 if [[ "${PVC_STATUS}" == "Bound" ]] || [[ "${PVC_STATUS}" == "Pending" ]]; then
   t_pass "PVC creation: ${PVC_STATUS}"
 else

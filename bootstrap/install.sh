@@ -2,7 +2,9 @@
 # install.sh — bootstrap a full k3d-lab cluster with Cilium and Gateway API
 set -Eeuo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "${REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 # shellcheck source=scripts/common.sh
 source "${REPO_ROOT}/scripts/common.sh"
 load_env
@@ -49,19 +51,31 @@ kubectl config use-context "${CONTEXT}"
 ok "kubectl context: ${CONTEXT}"
 
 ##############################################################################
-# Step 3: Wait for nodes
+# Step 3: Wait for API server reachable (NOT node Ready — no CNI yet)
 ##############################################################################
-section "Step 3/7: Wait for Nodes Ready"
-log "Waiting for all nodes to be Ready..."
-kubectl wait --for=condition=Ready nodes --all --timeout=120s
-ok "All nodes ready"
+section "Step 3/7: Wait for API Server"
+log "Waiting for Kubernetes API server to be reachable..."
+deadline=$(( $(date +%s) + 60 ))
+until kubectl get nodes &>/dev/null; do
+  if [[ $(date +%s) -gt ${deadline} ]]; then
+    die "Kubernetes API server did not become reachable within 60s"
+  fi
+  sleep 2
+done
+ok "API server reachable"
+log "Node status (NotReady is expected — no CNI installed yet):"
 kubectl get nodes -o wide
 
 ##############################################################################
-# Step 4: Install Cilium
+# Step 4: Install Cilium (CNI — nodes become Ready after this)
 ##############################################################################
 section "Step 4/7: Install Cilium"
 bash "${REPO_ROOT}/networking/cilium/install.sh"
+
+log "Waiting for nodes to become Ready after Cilium install..."
+kubectl wait --for=condition=Ready nodes --all --timeout=180s
+ok "All nodes ready"
+kubectl get nodes -o wide
 
 ##############################################################################
 # Step 5: Install Gateway API CRDs

@@ -3,7 +3,11 @@
 set -Eeuo pipefail
 
 # Resolve repository root (directory containing this scripts/ directory)
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Guard against re-declaration when common.sh is sourced from another script
+# that already set REPO_ROOT.
+if [[ -z "${REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 readonly REPO_ROOT
 
 # Load versions first, then .env (which can override)

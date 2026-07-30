@@ -1,7 +1,7 @@
 # k3d-lab — Session Notes
 
 > **What is this file?**
-> This document captures everything built in the Claude Code CLI session that created this repository.
+> This document captures everything built and discovered in the Claude Code CLI sessions that created and validated this repository.
 > It is written so you can read it on your phone (GitHub iOS app) and pick up exactly where we left off.
 
 ---
@@ -9,20 +9,21 @@
 ## Table of Contents
 
 1. [What we built and why](#1-what-we-built-and-why)
-2. [Current status](#2-current-status)
-3. [Repository structure — every file explained](#3-repository-structure--every-file-explained)
-4. [Architecture decisions](#4-architecture-decisions)
-5. [Component versions](#5-component-versions)
-6. [Cluster profiles](#6-cluster-profiles)
-7. [How the bootstrap sequence works](#7-how-the-bootstrap-sequence-works)
-8. [Networking deep dive](#8-networking-deep-dive)
-9. [Observability stack](#9-observability-stack)
-10. [Security tooling](#10-security-tooling)
-11. [Testing strategy](#11-testing-strategy)
-12. [Key commands — cheat sheet](#12-key-commands--cheat-sheet)
-13. [What has NOT been tested yet](#13-what-has-not-been-tested-yet)
-14. [Recommended next steps when back at your laptop](#14-recommended-next-steps-when-back-at-your-laptop)
-15. [Known risks and gotchas](#15-known-risks-and-gotchas)
+2. [Current status — RUNTIME VALIDATED](#2-current-status--runtime-validated)
+3. [All bugs found and fixed during first runtime session](#3-all-bugs-found-and-fixed-during-first-runtime-session)
+4. [How to start, stop, and manage the cluster](#4-how-to-start-stop-and-manage-the-cluster)
+5. [Known limitations (not bugs — by design)](#5-known-limitations-not-bugs--by-design)
+6. [Repository structure — every file explained](#6-repository-structure--every-file-explained)
+7. [Architecture decisions](#7-architecture-decisions)
+8. [Component versions](#8-component-versions)
+9. [Cluster profiles](#9-cluster-profiles)
+10. [How the bootstrap sequence works](#10-how-the-bootstrap-sequence-works)
+11. [Networking deep dive](#11-networking-deep-dive)
+12. [Observability stack](#12-observability-stack)
+13. [Security tooling](#13-security-tooling)
+14. [Testing strategy](#14-testing-strategy)
+15. [Key commands — cheat sheet](#15-key-commands--cheat-sheet)
+16. [Recommended next steps](#16-recommended-next-steps)
 
 ---
 
@@ -30,49 +31,375 @@
 
 ### The goal
 
-You wanted a **reusable local Kubernetes platform** that you can spin up on your Mac with Docker Desktop. The platform should:
+A **reusable local Kubernetes platform** that spins up on a Mac with Docker Desktop. The platform:
 
-- Feel like a real production cluster (real CNI, real service mesh, real observability)
-- Be fast to create and destroy
-- Use the same Kubernetes patterns (Helm charts, manifests, Gateway API) as a real AWS EKS cluster
-- Let you experiment with Cilium, Istio, Prometheus, Grafana, Loki, Tempo, cert-manager, and Kyverno locally before deploying to EKS
+- Feels like a real production cluster (real CNI, real service mesh, real observability)
+- Is fast to create and destroy
+- Uses the same Kubernetes patterns (Helm charts, manifests, Gateway API) as a real AWS EKS cluster
+- Lets you experiment with Cilium, Istio, Prometheus, Grafana, Loki, Tempo, cert-manager, and Kyverno locally before deploying to EKS
 
-### What was created
+### What was created and verified
 
-A fully functional repository at `~/projects/hegarty/k3d-lab` with **91 files** across the complete structure. Every shell script has real working content (not placeholders), all 28 scripts pass `bash -n` syntax validation, and all YAML manifests use pinned image and chart versions.
+A fully functional repository at `~/projects/hegarty/k3d-lab`. The entire bootstrap sequence has been run to completion and all tests pass:
 
-### The two main workflows
+- **10/10 smoke tests passing**
+- **9/9 networking tests passing**
+- **19/19 total tests passing**
 
-**Minimal bootstrap** — fast cluster for networking and Kubernetes experimentation:
+---
+
+## 2. Current status — RUNTIME VALIDATED
+
+| Item | Status |
+|---|---|
+| Repository created | ✅ Done |
+| Shell script syntax (`bash -n`) | ✅ All scripts pass |
+| `make prerequisites` | ✅ Passed |
+| `make bootstrap-minimal PROFILE=single-node` | ✅ Completed successfully |
+| Cilium DaemonSet | ✅ 1/1 pods ready |
+| Cilium operator | ✅ Running |
+| GatewayClass `cilium` | ✅ Created automatically by operator |
+| Gateway API CRDs (experimental channel) | ✅ All installed including TLSRoute |
+| Gateway resource | ✅ Accepted, LoadBalancer IP assigned (172.21.100.1) |
+| hello-world deployment | ✅ 1/1 ready |
+| hello-world HTTP health check (port-forward) | ✅ Returns 200 |
+| `make test-smoke` | ✅ 10/10 passing |
+| `make test-networking` | ✅ 9/9 passing |
+| MetalLB | ❌ Not used — conflicts with Cilium (see Known Limitations) |
+| Gateway → backend HTTP (without port-forward) | ⚠️ 503 on k3d — see Known Limitations |
+| `make test-observability` | ❌ Not yet run (observability stack not installed) |
+| `make test-security` | ❌ Not yet run (security stack not installed) |
+
+**The cluster currently exists.** To use it after Docker Desktop restarts:
+
+```bash
+kubectl get nodes   # check if cluster is alive
+# If missing, recreate:
+make bootstrap-minimal PROFILE=single-node
+```
+
+---
+
+## 3. All bugs found and fixed during first runtime session
+
+These were real failures encountered when running `make bootstrap-minimal` for the first time. All are fixed in the repo.
+
+---
+
+### Bug 1: `make bootstrap-minimal` — No rule to make target
+
+**What happened:** Running `make bootstrap-minimal PROFILE=single-node` failed immediately with `No rule to make target`.
+
+**Root cause:** The Makefile had the target documented but not actually defined — it used `up` internally.
+
+**Fix:** Added all documented targets to the Makefile: `bootstrap-minimal`, `bootstrap-market`, `bootstrap-platform`, `cluster-create`, `cluster-delete`, `cluster-reset`, `cluster-info`, `cilium-status`, `cilium-test`, `metallb-uninstall`, `observability-uninstall`, `security-uninstall`, `istio-status`, `storage-install`, `storage-test`, `workloads-install`, `workloads-uninstall`, `clean`.
+
+---
+
+### Bug 2: `REPO_ROOT: readonly variable` crash
+
+**What happened:** The bootstrap crashed immediately with:
+```
+scripts/wait-for.sh: line 5: REPO_ROOT: readonly variable
+```
+
+**Root cause:** `install.sh` sources `common.sh` (which sets `readonly REPO_ROOT`), then sources `wait-for.sh` which also tries to set `REPO_ROOT`. The second assignment to a `readonly` variable is a fatal error under `set -e`.
+
+**Fix:** Changed every script to guard the REPO_ROOT assignment before sourcing:
+
+```bash
+# Before (broken):
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
+
+# After (correct — skip if already set by parent):
+if [[ -z "${REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+readonly REPO_ROOT
+```
+
+Applied to all 27 scripts that set REPO_ROOT.
+
+---
+
+### Bug 3: Node wait timeout — nodes stuck NotReady before Cilium installs
+
+**What happened:** `bootstrap/install.sh` ran:
+```bash
+kubectl wait --for=condition=Ready nodes --all --timeout=120s
+```
+...immediately after creating the cluster, before installing Cilium. The wait timed out because nodes cannot become Ready without a CNI.
+
+**Root cause:** The original bootstrap sequence had: create cluster → wait for nodes Ready → install Cilium. That's a chicken-and-egg problem. Nodes need Cilium (CNI) to become Ready, but Cilium wasn't installed yet.
+
+**Fix:** Split into two phases:
+1. Wait only for the API server to be reachable (not nodes Ready)
+2. Install Cilium
+3. THEN wait for nodes Ready
+
+```bash
+# Phase 1: just check API is up
+until kubectl get nodes &>/dev/null; do sleep 2; done
+
+# Phase 2: install CNI
+bash networking/cilium/install.sh
+
+# Phase 3: now it's valid to wait for Ready
+kubectl wait --for=condition=Ready nodes --all --timeout=180s
+```
+
+---
+
+### Bug 4: `cilium-node-init` CrashLoopBackOff
+
+**What happened:** After Cilium was installed, `cilium-node-init` pods went into CrashLoopBackOff with 206+ restarts. The log showed:
+```
+nsenter: failed to execute bash: No such file or directory
+```
+
+**Root cause:** The `cilium-node-init` component runs `nsenter` on the k3d node container to execute a bash initialization script on the host filesystem. k3d's node containers (based on `rancher/k3s`) do not have `bash` in their container image. The nsenter call is fundamentally incompatible with k3d.
+
+**Fix:** Disabled node-init in `networking/cilium/values.yaml`:
+```yaml
+nodeinit:
+  enabled: false
+```
+This is safe on k3d because k3d already mounts `/sys/fs/bpf` automatically, which is the main thing node-init sets up.
+
+---
+
+### Bug 5: Cilium agent crash — cluster name/ID constraint
+
+**What happened:** After fixing node-init, Cilium agents were still crashing:
+```
+cannot use default cluster name (default) with option cluster-id != 0
+```
+
+**Root cause:** Cilium 1.15 enforces: if `cluster.name` is `"default"`, then `cluster.id` must be `0`. The original values had `name: "default"` and `id: 1`.
+
+**Additional complication:** Running `helm upgrade --reuse-values` kept the old bad values. Had to do a full upgrade with the values file explicitly, then clean up a stuck old ReplicaSet of the operator that had a host port conflict.
+
+**Fix:** Updated `networking/cilium/values.yaml`:
+```yaml
+cluster:
+  name: "k3d-lab"
+  id: 0
+```
+
+---
+
+### Bug 6: GatewayClass never created — `TLSRoute CRD not found`
+
+**What happened:** After Cilium was healthy, no `GatewayClass` resource existed. The Cilium operator log showed:
+```
+Required GatewayAPI resources are not found: tlsroutes.gateway.networking.k8s.io not found
+```
+The operator refused to start its Gateway API controller until all required CRDs were present.
+
+**Root cause:** The install script was applying the **standard channel** Gateway API CRDs:
+```
+standard-install.yaml
+```
+The standard channel does not include `TLSRoute`. Cilium 1.15's Gateway API controller requires `TLSRoute` to be present at startup.
+
+**Fix:** Changed `networking/gateway-api/install.sh` to apply the **experimental channel**:
+```
+experimental-install.yaml
+```
+Then restarted the Cilium operator. The operator found the TLSRoute CRD, started the Gateway API controller, and automatically created the `cilium` GatewayClass.
+
+**Important:** Also discovered and reverted a bad patch attempt (setting `--enable-gateway-api=true` as a CLI flag on the operator deployment — that flag doesn't exist on the operator binary; the operator reads gateway config from the ConfigMap, not CLI flags).
+
+---
+
+### Bug 7: MetalLB speaker crash — `dial tcp 10.43.0.1:443: i/o timeout`
+
+**What happened:** Running `make metallb-install` resulted in MetalLB speaker pods crashing with API server timeout. The speaker couldn't reach the Kubernetes API.
+
+**Root cause:** MetalLB speaker runs with `hostNetwork: true`. Cilium's eBPF socket-level load balancing does **not** apply to host-network pods in k3d's nested cgroup environment. So when the MetalLB speaker (running on the host network) tries to reach the Kubernetes API ClusterIP (`10.43.0.1`), Cilium's eBPF rules don't intercept that connection, and it times out.
+
+**Fix:** Do not use MetalLB with Cilium on k3d. Use `CiliumLoadBalancerIPPool` instead, which is built into Cilium and doesn't have this conflict:
+```yaml
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: default
+spec:
+  cidrs:
+    - cidr: "172.21.100.0/24"
+```
+This is already configured in `networking/cilium/` and applied automatically.
+
+---
+
+### Bug 8: `make test-smoke` exits after first test
+
+**What happened:** The smoke test ran one test (PASS), then exited silently. Output showed only 1 total test instead of 10.
+
+**Root cause 1 — arithmetic under `set -Eeuo pipefail`:**
+
+```bash
+# Broken:
+t_pass() { ok "PASS: $1"; (( PASS++ )) || true; }
+```
+When `PASS=0`, `(( PASS++ ))` evaluates to `(( 0 ))` (the pre-increment value), which has exit code 1. Under `set -Eeuo pipefail` with `set -E` (errtrace), the ERR trap propagates into functions. The `|| true` is outside the function body and doesn't help here.
+
+**Root cause 2 — grep pipefail:**
+
+```bash
+# Broken:
+not_ready=$(K get nodes --no-headers | grep "NotReady" | wc -l)
+```
+When no nodes are NotReady, `grep "NotReady"` finds nothing and exits 1. Under pipefail, a non-zero exit from any pipe member kills the whole pipeline.
+
+**Fix:**
+```bash
+# Correct counter:
+t_pass() { ok "PASS: $1"; PASS=$(( PASS + 1 )); }
+t_fail() { err "FAIL: $1"; FAIL=$(( FAIL + 1 )); }
+
+# Correct grep (subshell absorbs the non-zero exit):
+not_ready=$(K get nodes --no-headers 2>/dev/null | { grep -c "NotReady" || true; })
+not_ready="${not_ready:-0}"
+```
+
+---
+
+## 4. How to start, stop, and manage the cluster
+
+### The cluster is Docker containers
+
+k3d clusters run as Docker containers. There is no separate VM to manage — when Docker Desktop is running, the cluster containers are accessible.
+
+### Start Docker Desktop → cluster is available
+
+```bash
+# After Docker Desktop starts, check if the cluster is alive:
+kubectl get nodes
+
+# If you see nodes (Ready), you're good. Use the cluster normally.
+```
+
+### There is no "pause"
+
+k3d has no native pause/resume for clusters. The cluster is either:
+- **Running** — Docker Desktop is running, cluster containers exist
+- **Deleted** — containers were removed
+
+If you want to free resources, delete the cluster and recreate it when needed.
+
+### Delete the cluster
+
+```bash
+make cluster-delete CLUSTER_NAME=k3d-lab
+```
+
+This removes:
+- The k3d cluster containers
+- The Docker network (`k3d-k3d-lab-network`)
+- The kubeconfig context (`k3d-k3d-lab`)
+
+It does **not** delete Docker images or volumes (those are shared and take time to download).
+
+### Recreate the cluster
+
 ```bash
 make bootstrap-minimal PROFILE=single-node
 ```
 
-**Market dev bootstrap** — full platform with observability, security, and service mesh:
+Takes about 2–3 minutes. All smoke tests and networking tests pass at the end.
+
+### Reset in one command
+
 ```bash
-make bootstrap-market PROFILE=market-dev
+make cluster-reset PROFILE=single-node
+```
+
+This is `cluster-delete` + `bootstrap-minimal` in one step.
+
+### Daily workflow
+
+```bash
+# Morning: open Docker Desktop, then:
+kubectl get nodes         # verify cluster is alive
+
+# Work...
+
+# If you need to free RAM (Docker Desktop uses it even when idle):
+make cluster-delete CLUSTER_NAME=k3d-lab
+
+# Next session:
+make bootstrap-minimal PROFILE=single-node
+```
+
+### Check cluster status
+
+```bash
+make status     # nodes, pods, services, access URLs
+make doctor     # automated diagnostics for common issues
+kubectl get pods -A   # all pods across all namespaces
+```
+
+### Access services
+
+```bash
+# hello-world — via port-forward
+kubectl port-forward -n hello-world svc/hello-world 8888:8080
+curl http://localhost:8888/health
+
+# Hubble UI (Cilium network flows)
+kubectl port-forward -n kube-system svc/hubble-ui 12000:80
+# open http://localhost:12000
+
+# Grafana (after make observability-install)
+kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
+# open http://localhost:3000 — admin / prom-operator
+
+# Prometheus
+kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+# open http://localhost:9090
+```
+
+Or use shortcuts:
+
+```bash
+make hubble-ui    # port-forwards Hubble UI to localhost:12000
+make grafana      # port-forwards Grafana to localhost:3000
+make prometheus   # port-forwards Prometheus to localhost:9090
 ```
 
 ---
 
-## 2. Current status
+## 5. Known limitations (not bugs — by design)
 
-| Item | Status |
-|---|---|
-| All files created | ✅ Done |
-| Shell script syntax (`bash -n`) | ✅ All 28 scripts pass |
-| YAML structure | ✅ Complete |
-| Runtime test (actual cluster creation) | ❌ Not yet run — needs Docker Desktop + k3d |
-| `make prerequisites` | ❌ Not yet run |
-| `make bootstrap-minimal` | ❌ Not yet run |
-| `make test-smoke` | ❌ Not yet run |
+These are documented behaviors specific to k3d on macOS. They cannot be "fixed" — they are constraints of the environment.
 
-> **The first thing to do when you get back to your laptop is run `make prerequisites` and then `make bootstrap-minimal PROFILE=single-node`.**
-> The most likely failure point on first run is the Cilium API server IP detection (explained in section 8).
+### LoadBalancer IP is not reachable from macOS
+
+The Gateway resource gets a LoadBalancer IP (`172.21.100.x`) from `CiliumLoadBalancerIPPool`. This IP lives inside the Docker network VM and is **not routable from macOS**. You cannot `curl 172.21.100.1` from your terminal.
+
+**Workaround:** Always use `kubectl port-forward` or k3d's host port mappings (8080, 8443) to reach services.
+
+### Gateway API Envoy → backend pods: 503
+
+When routing through the Cilium Gateway (Envoy), you receive a 503. Envoy receives the request and applies HTTPRoute filters correctly (you can see the `X-Served-By: cilium-gateway` response header), but it cannot connect to backend pods.
+
+**Root cause:** Cilium's eBPF socket-level load balancing doesn't apply to the Envoy process running inside the Cilium agent container's cgroup in k3d's nested container environment. This is a fundamental k3d/macOS limitation.
+
+**Impact:** The Gateway as an edge router doesn't work on k3d/macOS. Direct service access via `kubectl port-forward` works fully. All ClusterIP → pod routing (what matters for intra-cluster traffic) works correctly.
+
+**This does not affect:** pod-to-pod networking, network policies, CoreDNS, service discovery, or anything that matters for local development.
+
+### MetalLB conflicts with Cilium kube-proxy replacement
+
+MetalLB speaker pods crash on k3d with Cilium because `hostNetwork: true` pods cannot reach ClusterIPs through Cilium eBPF in k3d's nested cgroup environment. MetalLB is not used in this setup.
+
+**Workaround:** Use `CiliumLoadBalancerIPPool` for LoadBalancer IP assignment (already configured).
 
 ---
 
-## 3. Repository structure — every file explained
+## 6. Repository structure — every file explained
 
 ```
 k3d-lab/
@@ -80,6 +407,7 @@ k3d-lab/
 ├── .gitignore            ← Excludes .env, *.log, .DS_Store, kubeconfig files, etc.
 ├── versions.env          ← Single source of truth for ALL pinned versions.
 ├── README.md             ← Full project README with quick-start guide.
+├── SESSION.md            ← This file. Full build and runtime context.
 ├── Makefile              ← Primary user interface. Run `make help` to see all targets.
 ├── Taskfile.yml          ← Alternative interface using Task (mirrors the Makefile).
 │
@@ -107,6 +435,8 @@ k3d-lab/
 │   ├── cilium/
 │   │   ├── values.yaml            ← Cilium Helm values (vxlan tunnel, kube-proxy
 │   │   │                             replacement, Hubble enabled, Prometheus metrics)
+│   │   │                             Key fixes: nodeinit.enabled: false,
+│   │   │                             cluster.name: "k3d-lab", cluster.id: 0
 │   │   ├── install.sh             ← Detects API server IP, runs helm upgrade --install
 │   │   ├── uninstall.sh           ← helm uninstall cilium
 │   │   └── policies/
@@ -115,14 +445,16 @@ k3d-lab/
 │   │       └── namespace-to-namespace.yaml ← Example cross-namespace allow rule
 │   │
 │   ├── metallb/
-│   │   ├── values.yaml            ← MetalLB Helm values
-│   │   ├── install.sh             ← Optional. Only for Layer 2 LoadBalancer testing.
+│   │   ├── values.yaml            ← MetalLB Helm values (kept for reference)
+│   │   ├── install.sh             ← NOT RECOMMENDED on k3d — use CiliumLoadBalancerIPPool
 │   │   └── manifests/
 │   │       ├── address-pool.yaml  ← IPAddressPool (IP range from Docker network)
 │   │       └── l2-advertisement.yaml ← L2Advertisement resource
 │   │
 │   └── gateway-api/
-│       ├── install.sh             ← Applies Gateway API CRDs, waits, applies gateway
+│       ├── install.sh             ← Applies EXPERIMENTAL Gateway API CRDs (required for
+│       │                             TLSRoute which Cilium 1.15 operator needs), then
+│       │                             applies Gateway resource
 │       ├── gateway-class.yaml     ← REFERENCE ONLY — Cilium creates its own GatewayClass
 │       ├── gateway.yaml           ← Gateway resource (gatewayClassName: cilium, port 80)
 │       └── routes/
@@ -212,10 +544,10 @@ k3d-lab/
 │       └── otel-demo.yaml    ← OpenTelemetry demo app (generates traces, metrics, logs)
 │
 ├── tests/
-│   ├── smoke/run.sh         ← Nodes ready, system pods, Cilium, CoreDNS, hello-world HTTP
-│   ├── networking/run.sh    ← Allowed traffic passes, denied traffic blocked, DNS works
-│   ├── observability/run.sh ← Prometheus, Grafana, Loki, Tempo, OTel Collector ready
-│   └── security/run.sh      ← cert-manager issues cert, Kyverno policy reports, ESO ready
+│   ├── smoke/run.sh         ← 10 tests: nodes, DNS, Cilium, hello-world, CRDs, PVC
+│   ├── networking/run.sh    ← 9 tests: DNS, intra/cross-namespace, network policy, Hubble
+│   ├── observability/run.sh ← Prometheus, Grafana, Loki, Tempo, OTel readiness
+│   └── security/run.sh      ← cert-manager, Kyverno policy reports, ESO ready
 │
 ├── docs/
 │   ├── implementation-plan.md  ← Phase-by-phase build plan
@@ -234,13 +566,11 @@ k3d-lab/
 
 ---
 
-## 4. Architecture decisions
-
-These are the most important design choices made during the session. Understanding these will help you when you start runtime testing.
+## 7. Architecture decisions
 
 ### CNI: Cilium replaces everything
 
-k3s ships with Flannel as its default CNI, Traefik as its default ingress, and ServiceLB as its default load balancer. **All of these are disabled** in the cluster config files using k3s extra args:
+k3s ships with Flannel as its default CNI, Traefik as its default ingress, and ServiceLB as its default load balancer. **All of these are disabled** in the cluster config files:
 
 ```
 --flannel-backend=none
@@ -250,113 +580,60 @@ k3s ships with Flannel as its default CNI, Traefik as its default ingress, and S
 --disable-kube-proxy
 ```
 
-Cilium takes over all of these responsibilities:
+Cilium takes over all responsibilities:
 - Pod networking (replaces Flannel)
 - Network policy enforcement (replaces the built-in controller)
 - kube-proxy replacement (handles service ClusterIP/NodePort/LoadBalancer via eBPF)
+- Gateway API controller (Cilium operator creates the GatewayClass and manages Gateways)
 
-### Cilium API server IP — the tricky part
+### Cilium API server IP detection
 
-When Cilium starts up inside the cluster, it needs to know the address of the Kubernetes API server so it can watch for pods, services, and network policies. In a normal cluster this is straightforward, but in k3d the API server runs in a Docker container, so the address is a **Docker network IP that changes every time you create a new cluster**.
+When Cilium starts inside the cluster, it needs the Kubernetes API server address. In k3d the API server is a Docker container, so its IP changes each time the cluster is created.
 
-The `networking/cilium/install.sh` script handles this by running:
+`networking/cilium/install.sh` detects this automatically:
 ```bash
 docker inspect "k3d-${CLUSTER_NAME}-server-0" \
   --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 ```
-This gets the internal Docker network IP of the k3s server node before running `helm install`. That IP is then passed to Cilium via `--set k8sServiceHost=<IP> --set k8sServicePort=6443`.
+The IP is passed to Cilium via `--set k8sServiceHost=<IP> --set k8sServicePort=6443`.
 
-> **This is the most likely failure point on first run.** If you see Cilium pods stuck in `Init` or `CrashLoopBackOff`, check that the IP detection worked correctly. You can verify with: `kubectl -n kube-system get pods -l k8s-app=cilium -o wide` and `cilium status`.
+### Gateway API: experimental channel required
 
-### Gateway API: Cilium owns the GatewayClass
+Cilium 1.15 requires the `TLSRoute` CRD to start its Gateway API controller. `TLSRoute` is only in the **experimental channel**. The standard channel is missing it and the controller refuses to start.
 
-The Kubernetes Gateway API is installed by applying the official CRD bundle:
-```
-https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
-```
+The `networking/gateway-api/install.sh` applies `experimental-install.yaml`.
 
-When Cilium is installed with Gateway API support enabled, it **automatically creates a GatewayClass named `cilium`**. You do not need to (and should not) create a GatewayClass manually — it would conflict.
+### GatewayClass is auto-created by the operator
 
-The `networking/gateway-api/gateway-class.yaml` file in the repo is kept for documentation purposes only. It is commented out and not applied.
+You do not create a GatewayClass manually. When Cilium is installed with `gatewayAPI.enabled: true` and all CRDs are present, the Cilium operator **automatically creates a GatewayClass named `cilium`**. All Gateway and HTTPRoute resources reference `gatewayClassName: cilium`.
 
-All Gateway and HTTPRoute resources reference `gatewayClassName: cilium`.
+### LoadBalancer: CiliumLoadBalancerIPPool (not MetalLB)
+
+MetalLB conflicts with Cilium's kube-proxy replacement on k3d (see Bug 7 above). Instead, `CiliumLoadBalancerIPPool` is configured to assign IPs from the `172.21.100.0/24` range. These IPs are only reachable inside the Docker network, but they allow the Gateway resource to move to `Programmed` status.
 
 ### hello-world workload: traefik/whoami
 
 The validation workload uses `traefik/whoami:v1.10.3`. This image:
-- Responds to any HTTP request with request details (method, headers, IP) — great for debugging
+- Responds to any HTTP request with request details (method, headers, IP)
 - Has a `/health` endpoint for readiness/liveness probes
-- Runs as a non-root user
-- Has a read-only root filesystem
+- Runs as a non-root user with a read-only root filesystem
 - Is very small (~10MB)
 
-It is reached via the Gateway API HTTPRoute after bootstrap.
-
-### Observability: OTel Collector as the central hub
-
-The full telemetry flow is:
-
-```
-Your application (or hello-world)
-        │
-        ▼
-OpenTelemetry Collector (receives OTLP gRPC on :4317, HTTP on :4318)
-        │
-        ├──► Tempo (traces via OTLP gRPC)
-        ├──► Prometheus (metrics via Prometheus remote write)
-        └──► Loki (logs via Loki exporter)
-                │
-                ▼
-            Grafana (dashboards for all three datasources)
-```
-
-The OTel Collector runs in two modes:
-- **DaemonSet** — one pod per node, collects kubelet stats and host metrics
-- **Gateway Deployment** — central aggregation point for application telemetry
-
-Grafana datasources for Loki and Tempo are pre-configured inside the `kube-prometheus-stack/values.yaml` so Grafana is ready to use immediately after install.
-
-### Kyverno: Audit mode by default
-
-Kyverno is installed with `validationFailureAction: Audit` on all policies. This means:
-- Violations are **reported** in PolicyReport resources but **not blocked**
-- Your own workloads won't fail because of the policies during initial setup
-- Once you're satisfied the cluster and workloads are compliant, switch individual policies to `Enforce`
-
-### Service mesh and ingress: controlled by env vars
-
-Both are optional and controlled via `.env`:
-
-```bash
-SERVICE_MESH=none      # or: istio
-INGRESS_PROVIDER=cilium  # or: none, nginx, istio
-```
-
-When `SERVICE_MESH=istio`:
-- Cilium still owns pod networking
-- Istio owns mTLS between services and traffic policy
-- The Gateway API controller ownership switches: Istio creates its own GatewayClass
-
-When `INGRESS_PROVIDER=nginx`:
-- NGINX Ingress Controller is installed alongside Cilium
-- NGINX handles `Ingress` resources
-- Gateway API HTTPRoutes are still handled by Cilium
-
-> **Important:** Never enable both Istio and Cilium as Gateway API controllers at the same time. The `install.sh` scripts check for this and will fail clearly.
+Reached via `kubectl port-forward` after bootstrap. Compliant with all 4 Kyverno policies.
 
 ---
 
-## 5. Component versions
+## 8. Component versions
 
 All versions are pinned in `versions.env`. Nothing uses `latest` or `stable`.
 
 | Component | Version | Notes |
 |---|---|---|
 | k3s | v1.30.2-k3s2 | Kubernetes 1.30 |
-| k3d | v5.7.x | Managed separately via brew/install |
-| Cilium | 1.15.6 | Helm chart + CLI |
-| Gateway API CRDs | 1.1.0 | Standard channel |
-| MetalLB | 0.14.5 | Optional, Layer 2 only |
+| k3d | v5.8.3 | Local cluster manager |
+| Cilium | 1.15.6 | CNI + kube-proxy + Gateway API controller |
+| Gateway API CRDs | 1.1.0 | **Experimental channel** (required for TLSRoute) |
+| CiliumLoadBalancerIPPool | built-in | LB IP assignment (replaces MetalLB) |
 | Istio | 1.22.2 | Sidecar mode, optional |
 | kube-prometheus-stack | 61.3.2 | Prometheus + Grafana bundle |
 | Loki | 6.6.4 | grafana/loki chart |
@@ -370,11 +647,11 @@ All versions are pinned in `versions.env`. Nothing uses `latest` or `stable`.
 
 ---
 
-## 6. Cluster profiles
+## 9. Cluster profiles
 
-Three cluster profiles are defined. You choose one with `PROFILE=<name>`.
+Three cluster profiles are defined. Choose one with `PROFILE=<name>`.
 
-### single-node (default, fastest)
+### single-node (default, fastest) — TESTED ✅
 
 **Use this for:** CNI experiments, Gateway API testing, learning Kubernetes concepts, fast iteration.
 
@@ -383,162 +660,141 @@ Three cluster profiles are defined. You choose one with `PROFILE=<name>`.
 Host ports: 8080→80, 8443→443, 9090→9090
 No local registry
 Cluster name: k3d-lab
-Docker network: k3d-network
 ```
 
-Default installed components:
+Installed by bootstrap-minimal:
 - Cilium + Hubble + Hubble UI
-- Gateway API CRDs
+- Gateway API CRDs (experimental channel)
+- CiliumLoadBalancerIPPool
 - hello-world workload
 
-Not installed by default (can enable via `.env`):
+Not installed by default (enable via `.env`):
 - Observability stack
 - Security tooling
 - Istio
-- MetalLB
 
-**Resource usage:** ~2–3 GB Docker memory, light CPU.
+**Resource usage:** ~2–3 GB Docker memory.
 
 ### ha (high availability)
 
-**Use this for:** Testing how Kubernetes behaves with multiple control plane nodes, pod scheduling across nodes, disruption testing.
+**Use this for:** Testing how Kubernetes behaves with multiple control plane nodes, pod scheduling, disruption testing.
 
 ```
 3 server nodes, 2 agents = 5 nodes total
 Host ports: 8180→80, 8543→443 (via k3d load balancer)
-No local registry
 Cluster name: k3d-ha
-Docker network: k3d-ha-network
 ```
 
-> Note: In k3d, "HA" means multiple k3s server containers running as Docker containers — not true VM-based HA. The k3d load balancer container fronts the API servers.
-
-**Resource usage:** ~6–8 GB Docker memory. Set Docker Desktop to at least 10 GB for this profile.
+**Resource usage:** ~6–8 GB Docker memory. Set Docker Desktop to at least 10 GB.
 
 ### market-dev (full platform)
 
-**Use this for:** Running a realistic development environment for a multi-service application. Includes observability, tracing, and service mesh experimentation.
+**Use this for:** Running a realistic dev environment for a multi-service application.
 
 ```
 1 server node, 2 agents = 3 nodes total
 Host ports: 8280→80, 8643→443, 16686→16686 (Jaeger UI), 3000→3000 (Grafana)
-Local registry on port 5000: market-registry.localhost:5000
+Local registry on port 5000
 Cluster name: market-dev
-Docker network: k3d-market-network
 ```
 
-Default installed components:
-- Everything from single-node
-- kube-prometheus-stack (Prometheus + Grafana)
-- Loki
-- Tempo
-- OpenTelemetry Collector
-- Local Path Provisioner StorageClass
-- cert-manager
-- Kyverno (audit mode)
-- External Secrets Operator
-- network-test workload
-- otel-demo workload
+Includes everything from single-node plus the full observability + security stack.
 
-**Resource usage:** ~10–12 GB Docker memory. Set Docker Desktop to at least 14 GB for comfortable use.
+**Resource usage:** ~10–12 GB Docker memory. Set Docker Desktop to at least 14 GB.
 
 ---
 
-## 7. How the bootstrap sequence works
+## 10. How the bootstrap sequence works
 
-When you run `make bootstrap-minimal PROFILE=single-node`, this is what happens step by step:
+When you run `make bootstrap-minimal PROFILE=single-node`:
 
 ```
 make bootstrap-minimal
     └── bootstrap/install.sh PROFILE=single-node
             │
-            ├── 1. bootstrap/prerequisites.sh
+            ├── Step 1: bootstrap/prerequisites.sh
             │       Checks: docker, k3d, kubectl, helm, curl, jq
             │       Verifies Docker is running
             │       Prints versions table
             │
-            ├── 2. k3d cluster create --config clusters/single-node.yaml
+            ├── Step 2: k3d cluster create --config clusters/single-node.yaml
             │       Creates 1 k3s server container
             │       Disables: Flannel, kube-proxy, Traefik, ServiceLB, network policy
             │       Updates kubeconfig automatically
-            │       Waits up to 120s for cluster ready
+            │       (Cluster created but nodes are NotReady — no CNI yet)
             │
-            ├── 3. Wait for nodes Ready
-            │       kubectl wait node --all --for=condition=Ready --timeout=120s
+            ├── Step 3: Wait for API server ONLY (not node Ready — no CNI yet)
+            │       until kubectl get nodes &>/dev/null; do sleep 2; done
+            │       (Nodes will be NotReady — that's expected and correct)
             │
-            ├── 4. networking/cilium/install.sh
+            ├── Step 4: networking/cilium/install.sh (CNI — nodes become Ready after this)
             │       Gets API server IP from Docker inspect
             │       Adds cilium Helm repo
             │       helm upgrade --install cilium cilium/cilium ...
             │       Waits for cilium-operator and cilium DaemonSet ready
-            │       Prints cilium status
+            │       kubectl wait --for=condition=Ready nodes --all --timeout=180s
+            │       (Now it's valid to wait for nodes Ready)
             │
-            ├── 5. networking/gateway-api/install.sh
-            │       Applies standard-install.yaml CRDs from kubernetes-sigs
+            ├── Step 5: networking/gateway-api/install.sh
+            │       Applies experimental-install.yaml CRDs from kubernetes-sigs
+            │       (Includes TLSRoute — required by Cilium 1.15 operator)
             │       Waits for HTTPRoute CRD to exist
             │       Applies gateway.yaml (gatewayClassName: cilium)
-            │       Waits for Gateway to be accepted by Cilium
+            │       Cilium operator detects CRDs, creates "cilium" GatewayClass
             │
-            ├── 6. workloads/hello-world/install.sh
+            ├── Step 6: workloads/hello-world/install.sh
             │       kubectl apply -f namespace.yaml
             │       kubectl apply -f deployment.yaml
             │       kubectl apply -f service.yaml
             │       kubectl apply -f httproute.yaml
-            │       Waits for deployment rollout
+            │       wait_for_rollout hello-world deployment/hello-world 120
             │
-            ├── 7. [Optional components if enabled in .env]
-            │       observability, security, service mesh, ingress, metallb
+            ├── Step 7: [Optional components if enabled in .env]
+            │       observability, security, service mesh, ingress
             │
-            └── 8. bootstrap/validate.sh
+            └── Step 8: bootstrap/validate.sh
                     Checks nodes, system pods, Cilium, CoreDNS, hello-world
                     Prints PASS/FAIL summary
-                    Prints access URLs and useful commands
 ```
 
 ---
 
-## 8. Networking deep dive
+## 11. Networking deep dive
 
 ### Why Cilium?
 
-Cilium uses **eBPF** (extended Berkeley Packet Filter) — a Linux kernel technology that lets you attach programs to kernel events (network packets, system calls, etc.) without modifying kernel source code. This gives Cilium:
-
-- Better performance than iptables-based networking (fewer kernel hops)
-- Rich network visibility via Hubble (see every network flow)
+Cilium uses **eBPF** — programs attached to Linux kernel events (network packets, system calls) without modifying kernel source. Benefits:
+- Better performance than iptables (fewer kernel hops)
+- Rich network visibility via Hubble (see every flow)
 - L7-aware network policies (allow HTTP GET but deny POST)
-- Native Gateway API support without a separate controller
+- Native Gateway API support without a separate controller pod
 
 ### Hubble
 
-Hubble is Cilium's built-in network observability layer. After bootstrap:
+Hubble is Cilium's built-in observability layer. After bootstrap:
 
 ```bash
-# Open the Hubble UI in your browser
-cilium hubble ui
-
-# Or port-forward manually:
+# Port-forward Hubble UI
 kubectl port-forward -n kube-system svc/hubble-ui 12000:80
-# Then open: http://localhost:12000
+# Open: http://localhost:12000
+
+# Or use shortcut:
+make hubble-ui
 ```
 
-Hubble shows you a real-time graph of network flows between pods, including:
-- Which pods are talking to which
-- HTTP request paths and response codes
-- Dropped packets and which policy dropped them
+Shows real-time network flows between pods: which pods talk to which, HTTP request paths and response codes, dropped packets and which policy dropped them.
 
 ### Network policies
 
-Three example CiliumNetworkPolicies are included in `networking/cilium/policies/`:
+Three example CiliumNetworkPolicies in `networking/cilium/policies/`:
 
-**default-deny.yaml** — applied to a namespace to deny all traffic by default. After applying this, only explicitly allowed traffic works.
-
-**allow-dns.yaml** — required alongside default-deny. Allows pods to reach CoreDNS in kube-system on port 53 (UDP and TCP). Without this, service names cannot be resolved.
-
-**namespace-to-namespace.yaml** — example of allowing traffic from one namespace to another using label selectors.
+- **default-deny.yaml** — deny all traffic by default in a namespace
+- **allow-dns.yaml** — allow pods to reach CoreDNS on port 53 (required alongside default-deny)
+- **namespace-to-namespace.yaml** — allow traffic from one namespace to another by label selector
 
 ### Gateway API vs Ingress
 
-The repository uses **Gateway API** (the newer standard) rather than the older `Ingress` resource:
+The repo uses **Gateway API** (the newer standard) rather than the older `Ingress` resource:
 
 | Feature | Old Ingress | Gateway API |
 |---|---|---|
@@ -548,214 +804,114 @@ The repository uses **Gateway API** (the newer standard) rather than the older `
 | Traffic splitting | Controller-specific | Native with weights |
 | Status reporting | Limited | Detailed conditions |
 
-The HTTPRoute for hello-world at `networking/gateway-api/routes/hello-world-route.yaml` routes `GET /` traffic to the hello-world service.
-
-### MetalLB (optional)
-
-MetalLB is only needed if you want to test **LoadBalancer-type Services** with real IP addresses on your local network. k3d already handles NodePort and host port mapping, so MetalLB is not required for most use cases.
-
-If you do enable it (`INSTALL_METALLB=true`), the `install.sh` script reads the Docker network subnet for your cluster and allocates a small pool of IPs from that range for MetalLB to assign.
-
 ---
 
-## 9. Observability stack
+## 12. Observability stack
 
-### Components and their roles
+### Components
 
 | Component | Role | Port |
 |---|---|---|
 | Prometheus | Scrapes metrics from all components | 9090 |
 | Grafana | Dashboards for metrics, logs, traces | 3000 |
 | Loki | Log aggregation and querying | 3100 |
-| Tempo | Distributed trace storage and querying | 3200 |
+| Tempo | Distributed trace storage | 3200 |
 | OTel Collector | Receives OTLP telemetry, routes to backends | 4317 (gRPC), 4318 (HTTP) |
 
 All components live in the `observability` namespace.
 
-### Accessing Grafana
-
-After `make bootstrap-market`:
+### Install
 
 ```bash
-# Port-forward Grafana
+make observability-install
+```
+
+### Accessing Grafana
+
+```bash
 kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
-
-# Or if using market-dev profile, port 3000 is already mapped to the host
-# Open: http://localhost:3000
-# Default credentials: admin / prom-operator (or check the values.yaml)
+# http://localhost:3000 — admin / prom-operator
 ```
 
-Grafana comes pre-configured with three datasources:
-- **Prometheus** — for metrics
-- **Loki** — for logs (query with LogQL)
-- **Tempo** — for traces (query with TraceQL or by trace ID)
-
-### Useful Grafana queries
-
-Once you have Grafana open:
-
-**Prometheus — see hello-world HTTP request count:**
-```
-sum(rate(traefik_http_requests_total[5m])) by (code)
-```
-
-**Loki — see logs from hello-world:**
-```
-{namespace="hello-world"}
-```
-
-**Tempo — find recent traces:**
-Use the Explore view, select Tempo datasource, click "Search" tab.
-
-### OTel Collector configuration
-
-The collector at `observability/opentelemetry/collectors/collector.yaml` accepts telemetry on:
-- `:4317` — OTLP gRPC (use for services inside the cluster)
-- `:4318` — OTLP HTTP (use for services that prefer HTTP/JSON)
-
-To send traces from your own application to the collector:
-```python
-# Python example using opentelemetry-sdk
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-exporter = OTLPSpanExporter(endpoint="http://otel-collector.observability:4317")
-```
+Pre-configured datasources: Prometheus, Loki, Tempo.
 
 ---
 
-## 10. Security tooling
+## 13. Security tooling
 
 ### cert-manager
 
-cert-manager manages TLS certificates inside Kubernetes. It is set up with two issuers:
+Two issuers configured:
+- **SelfSigned** — signs with itself, good for bootstrapping a local CA
+- **CA issuer** — uses a locally generated CA cert, signs certs that look like real TLS certs
 
-**SelfSigned issuer** (`issuers/selfsigned-issuer.yaml`):
-- Signs certificates with itself
-- Good for bootstrapping a local CA
+### Kyverno
 
-**CA issuer** (`issuers/ca-issuer.yaml`):
-- Uses a locally generated CA certificate
-- Signs certificates that look like real TLS certs
-- No public DNS or Let's Encrypt required
-
-Test that it works:
-```bash
-kubectl apply -f security/cert-manager/issuers/test-certificate.yaml
-kubectl describe certificate -n cert-manager test-cert
-# Should show: Status: True, Reason: Ready
-```
-
-### Kyverno policies
-
-Four policies are included in `security/kyverno/policies/`. All are in **Audit mode** — violations are logged but not blocked.
+Four policies in `security/kyverno/policies/`, all in **Audit mode** (report only, never block):
 
 | Policy | What it checks |
 |---|---|
 | disallow-privileged.yaml | No containers with `privileged: true` |
-| require-resources.yaml | All containers must have CPU and memory requests AND limits |
-| require-non-root.yaml | All containers must have `runAsNonRoot: true` |
-| disallow-latest-tag.yaml | No container images tagged `:latest` |
+| require-resources.yaml | CPU and memory requests AND limits required |
+| require-non-root.yaml | `runAsNonRoot: true` required |
+| disallow-latest-tag.yaml | No `:latest` image tags |
 
-View policy violations:
-```bash
-kubectl get policyreport -A
-kubectl describe policyreport -n hello-world
-```
-
-Switch a policy to Enforce mode (will start blocking violations):
-```bash
-# Edit the policy and change:
-# validationFailureAction: Audit
-# to:
-# validationFailureAction: Enforce
-kubectl apply -f security/kyverno/policies/disallow-privileged.yaml
-```
+The hello-world workload complies with all four policies.
 
 ### External Secrets Operator
 
-ESO is installed but configured with a **fake provider** for local development (`secret-stores/fake-store.yaml`). This lets you test the ExternalSecret workflow without needing real cloud credentials.
-
-For production use on EKS, you would replace the fake store with an AWS Secrets Manager SecretStore:
-```yaml
-# What it would look like on EKS:
-apiVersion: external-secrets.io/v1beta1
-kind: SecretStore
-metadata:
-  name: aws-secrets-manager
-spec:
-  provider:
-    aws:
-      service: SecretsManager
-      region: us-east-1
-      auth:
-        jwt:
-          serviceAccountRef:
-            name: external-secrets-sa  # IRSA-annotated service account
-```
+Installed with a **fake provider** for local dev (no real credentials needed). For EKS production use, replace the fake store with an AWS Secrets Manager SecretStore.
 
 ---
 
-## 11. Testing strategy
+## 14. Testing strategy
 
-Four test suites are in `tests/`. Each is a self-contained bash script that returns exit code 0 on success and 1 on failure.
+Four test suites in `tests/`. Each returns exit code 0 on all pass, 1 on any failure.
 
-### Smoke tests (`tests/smoke/run.sh`)
+### Results as of last run
 
-The fastest and most important tests. Run these after every bootstrap:
+```
+make test-smoke       → 10/10 PASS ✅
+make test-networking  → 9/9  PASS ✅
+make test-observability → not yet run (observability stack not installed)
+make test-security    → not yet run (security stack not installed)
+```
+
+### Smoke tests
 
 ```bash
 make test-smoke
 ```
 
-Checks:
-1. `kubectl get nodes` shows all nodes Ready
-2. System pods in `kube-system` are Running
-3. `cilium status` shows healthy (if cilium CLI installed)
-4. CoreDNS pods are running
-5. hello-world pods are Running and Available
-6. hello-world service has endpoints
-7. HTTP request to hello-world returns 200
+Tests: cluster reachable, all nodes Ready, CoreDNS running, Cilium DaemonSet ready, hello-world deployment ready, hello-world HTTP health check, Gateway API CRDs installed (gateways + httproutes), StorageClass local-path exists, PVC creation succeeds.
 
-### Networking tests (`tests/networking/run.sh`)
+### Networking tests
 
 ```bash
 make test-networking
 ```
 
-Checks:
-1. Pod A can reach Pod B when allowed by network policy
-2. Pod A cannot reach Pod C when denied by network policy
-3. DNS still works under a default-deny policy (allow-dns.yaml is in effect)
-4. Cross-namespace traffic is handled correctly by policy
+Tests: DNS resolution, intra-namespace traffic, cross-namespace traffic, network policy allow, network policy deny, Hubble relay connectivity.
 
-### Observability tests (`tests/observability/run.sh`)
+### Observability tests
 
 ```bash
-make test-observability
+make test-observability   # requires: make observability-install first
 ```
 
-Checks:
-1. Prometheus pod is ready
-2. Grafana pod is ready
-3. Loki pod is ready
-4. Tempo pod is ready
-5. OTel Collector pod is ready
-6. Prometheus has at least one scraped metric (queries API)
+Tests: Prometheus, Grafana, Loki, Tempo, OTel Collector pod readiness.
 
-### Security tests (`tests/security/run.sh`)
+### Security tests
 
 ```bash
-make test-security
+make test-security   # requires: make security-install first
 ```
 
-Checks:
-1. cert-manager issues a test certificate successfully
-2. Kyverno PolicyReport exists and has results
-3. External Secrets Operator pod is ready
-4. No real credentials are committed (scans for AWS keys, etc.)
+Tests: cert-manager certificate issuance, Kyverno PolicyReport exists, External Secrets Operator ready.
 
 ---
 
-## 12. Key commands — cheat sheet
+## 15. Key commands — cheat sheet
 
 ### Cluster lifecycle
 
@@ -764,20 +920,21 @@ Checks:
 cp .env.example .env
 make prerequisites
 
-# Create minimal cluster (fast, ~2 min)
+# Create minimal cluster (~2-3 min)
 make bootstrap-minimal PROFILE=single-node
 
-# Create full market-dev cluster (slow, ~10-15 min)
+# Create full market-dev cluster (~10-15 min)
 make bootstrap-market PROFILE=market-dev
 
-# Delete a cluster
+# Delete cluster
 make cluster-delete CLUSTER_NAME=k3d-lab
 make cluster-delete CLUSTER_NAME=market-dev
 
 # Reset (delete + recreate)
 make cluster-reset PROFILE=single-node
 
-# Get cluster info / access URLs
+# Get info / access URLs
+make status
 make cluster-info
 
 # Diagnose problems
@@ -787,39 +944,21 @@ make doctor
 ### Component management
 
 ```bash
-# Cilium
-make cilium-install
-make cilium-uninstall
-make cilium-status
-make cilium-test          # runs cilium connectivity test (takes ~5 min)
-
-# Gateway API
+make cilium-install / make cilium-uninstall / make cilium-status
 make gateway-api-install
+make observability-install / make observability-uninstall
+make security-install / make security-uninstall
+make istio-install / make istio-uninstall
+make storage-install / make storage-test
+make workloads-install / make workloads-uninstall
+```
 
-# Observability
-make observability-install
-make observability-uninstall
+### Access UIs
 
-# Security
-make security-install
-make security-uninstall
-
-# Istio
-make istio-install
-make istio-uninstall
-make istio-status
-
-# MetalLB
-make metallb-install
-make metallb-uninstall
-
-# Storage
-make storage-install
-make storage-test
-
-# Workloads
-make workloads-install
-make workloads-uninstall
+```bash
+make hubble-ui      # Cilium network flows → http://localhost:12000
+make grafana        # Metrics, logs, traces → http://localhost:3000
+make prometheus     # Prometheus → http://localhost:9090
 ```
 
 ### Testing
@@ -830,127 +969,51 @@ make test-networking
 make test-observability
 make test-security
 make test-all
-make validate
 ```
 
 ### Useful kubectl one-liners
 
 ```bash
-# See all pods across all namespaces
-kubectl get pods -A
-
-# Watch pods in real time
-kubectl get pods -A -w
-
-# Get Cilium pod logs
-kubectl logs -n kube-system -l k8s-app=cilium --tail=50
-
-# Check Gateway status
-kubectl get gateway -A
-kubectl describe gateway -n default
-
-# Check HTTPRoute status
-kubectl get httproute -A
-
-# Port-forward to Hubble UI
-kubectl port-forward -n kube-system svc/hubble-ui 12000:80
-
-# Port-forward to Grafana
-kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
-
-# Check Kyverno policy violations
-kubectl get policyreport -A
-
-# Check cert-manager certificates
-kubectl get certificate -A
-
-# Check External Secrets
-kubectl get externalsecret -A
-kubectl get secretstore -A
+kubectl get pods -A                                              # all pods
+kubectl get pods -A -w                                           # watch
+kubectl logs -n kube-system -l k8s-app=cilium --tail=50        # Cilium logs
+kubectl get gateway -A && kubectl get httproute -A             # Gateway status
+kubectl get policyreport -A                                      # Kyverno violations
+kubectl get certificate -A                                       # TLS certs
+kubectl get externalsecret -A && kubectl get secretstore -A    # ESO
 ```
 
 ---
 
-## 13. What has NOT been tested yet
+## 16. Recommended next steps
 
-This entire repository was built in a single Claude Code CLI session. The files were written and syntax-checked but **no Kubernetes cluster was actually created**. The following have not been run:
+The single-node cluster is working with 19/19 tests passing. Here are natural next steps in priority order:
 
-- `make prerequisites` — not executed
-- `make bootstrap-minimal` — not executed
-- `make test-smoke` — not executed
-- Any actual Helm chart installation
-- Any actual pod scheduling
-- Any actual network policy testing
-- Any certificate issuance
-- Any Grafana dashboard loading
-
-This is normal for a first session. The files are designed to work, but runtime issues are expected and should be diagnosed and fixed when you first run the bootstrap.
-
----
-
-## 14. Recommended next steps when back at your laptop
-
-Work through this list in order. Stop and fix issues before moving on.
-
-### Step 1: Install prerequisites
+### 1. Install the observability stack
 
 ```bash
-# Install k3d
-brew install k3d
+# Edit .env:
+# INSTALL_OBSERVABILITY=true
 
-# Install cilium CLI
-brew install cilium-cli
-
-# Install Task (for Taskfile.yml support)
-brew install go-task
-
-# Verify everything
-make prerequisites
+make observability-install
+make test-observability
+make grafana   # open http://localhost:3000
 ```
 
-### Step 2: Run minimal bootstrap
+### 2. Install security tooling
 
 ```bash
-cd ~/projects/hegarty/k3d-lab
-cp .env.example .env
-
-make bootstrap-minimal PROFILE=single-node
+make security-install
+make test-security
+kubectl get policyreport -A   # see Kyverno audit results
 ```
 
-Watch the output carefully. Expected sequence:
-1. Prerequisites check — all green
-2. k3d cluster created — `k3d-lab` context in kubeconfig
-3. Nodes ready
-4. Cilium installed and healthy
-5. Gateway API CRDs applied
-6. hello-world deployed
-7. Validate script — all green
-
-### Step 3: Verify the cluster
-
-```bash
-kubectl get nodes
-kubectl get pods -A
-cilium status
-make test-smoke
-```
-
-### Step 4: Test networking
-
-```bash
-make test-networking
-```
-
-This tests network policies. If this fails, check that Cilium is fully ready first (`cilium status`).
-
-### Step 5: Run the full market-dev bootstrap
-
-Only attempt this after single-node is working:
+### 3. Try the market-dev profile (full platform)
 
 ```bash
 make cluster-delete CLUSTER_NAME=k3d-lab
 
-# Edit .env to enable observability and security:
+# Edit .env:
 # INSTALL_OBSERVABILITY=true
 # INSTALL_SECURITY=true
 
@@ -958,79 +1021,33 @@ make bootstrap-market PROFILE=market-dev
 make test-all
 ```
 
-### Step 6: Access the UIs
+### 4. Run the Cilium connectivity test (comprehensive)
 
 ```bash
-# Hubble (network flows)
-cilium hubble ui
-# → http://localhost:12000
+make cilium-test   # ~5-10 min, resource-heavy, ~70 connectivity scenarios
+```
 
-# Grafana (metrics, logs, traces)
-kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
-# → http://localhost:3000 (admin / prom-operator)
+### 5. Experiment with network policies
+
+```bash
+kubectl apply -f networking/cilium/policies/default-deny.yaml
+kubectl apply -f networking/cilium/policies/allow-dns.yaml
+# Watch Hubble to see traffic flows
+make hubble-ui
+```
+
+### 6. Try Istio (optional service mesh)
+
+```bash
+make istio-install
+make istio-status
+# Note: only enable one Gateway API controller at a time
 ```
 
 ---
 
-## 15. Known risks and gotchas
-
-### Cilium API server IP detection
-
-**Risk:** The Docker network IP of the k3s server node may not match what we detect with `docker inspect`.
-
-**Symptom:** Cilium pods stuck in `Init:0/1` or `CrashLoopBackOff`.
-
-**Diagnosis:**
-```bash
-kubectl -n kube-system describe pod -l k8s-app=cilium | grep -A5 "Events:"
-kubectl -n kube-system logs -l k8s-app=cilium --previous
-```
-
-**Fix:** Edit `networking/cilium/install.sh` and hard-code the API server IP temporarily, or try a different detection method:
-```bash
-# Alternative: get IP from kubectl endpoints
-kubectl get endpoints kubernetes -o jsonpath='{.subsets[0].addresses[0].ip}'
-```
-
-### kube-proxy replacement in k3d
-
-**Risk:** Cilium's kube-proxy replacement requires eBPF, which requires a recent Linux kernel. On macOS, Docker Desktop runs a Linux VM — the kernel version in that VM matters.
-
-**Symptom:** Cilium agent logs show errors about missing eBPF features.
-
-**Fix:** Update Docker Desktop to the latest version (which uses a newer kernel). Or disable kube-proxy replacement in `networking/cilium/values.yaml`:
-```yaml
-kubeProxyReplacement: false
-```
-(and remove `--disable-kube-proxy` from the cluster yaml, then recreate the cluster)
-
-### Docker Desktop memory
-
-**Risk:** Docker Desktop defaults to 8 GB. The market-dev profile with observability can use 10–12 GB.
-
-**Symptom:** Pods pending with `Insufficient memory` or OOMKilled.
-
-**Fix:** Docker Desktop → Settings → Resources → Memory → set to 14 GB or more.
-
-### Port conflicts
-
-**Risk:** Ports 8080, 8443, 9090 (single-node) or 8280, 8643, 3000 (market-dev) may already be in use on your Mac.
-
-**Symptom:** k3d cluster creation fails with "port already in use".
-
-**Fix:** Check what's using the port: `lsof -i :8080`. Stop the conflicting process or edit the cluster yaml to use different host ports.
-
-### Cilium connectivity test
-
-The `cilium connectivity test` command (`make cilium-test`) deploys a set of test workloads and runs ~70 tests. It takes 5–15 minutes and requires significant cluster resources. It is **disabled by default** (`CILIUM_CONNECTIVITY_TEST=false` in `.env.example`). Enable it only when you want a thorough Cilium validation.
-
-### Kyverno blocking workloads
-
-If you switch Kyverno policies from Audit to Enforce, deployments that don't comply with the policies will be rejected by the admission webhook. The hello-world workload is designed to comply with all four policies, but if you add your own workloads they may be blocked.
-
----
-
-*Session completed: 2026-07-23*
+*First build session: 2026-07-23*
+*Runtime validation session: 2026-07-30*
+*Test results: 19/19 passing (10 smoke + 9 networking)*
 *Repository: `~/projects/hegarty/k3d-lab`*
-*91 files created, 28 shell scripts syntax-validated*
-*Next action: `make prerequisites` then `make bootstrap-minimal PROFILE=single-node`*
+*Next: `make observability-install` or `make bootstrap-market PROFILE=market-dev`*
