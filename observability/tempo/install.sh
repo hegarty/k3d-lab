@@ -32,7 +32,7 @@ helm upgrade --install tempo grafana/tempo \
   --version "${TEMPO_VERSION}" \
   --namespace "${OBSERVABILITY_NAMESPACE}" \
   --values "${REPO_ROOT}/observability/tempo/values.yaml" \
-  --timeout 5m \
+  --timeout 10m \
   --wait
 
 ok "Tempo installed"

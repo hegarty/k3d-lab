@@ -32,7 +32,7 @@ helm upgrade --install cert-manager jetstack/cert-manager \
   --version "${CERT_MANAGER_VERSION}" \
   --namespace "${CERT_MANAGER_NAMESPACE}" \
   --values "${REPO_ROOT}/security/cert-manager/values.yaml" \
-  --timeout 5m \
+  --timeout 10m \
   --wait
 
 ok "cert-manager installed"

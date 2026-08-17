@@ -65,7 +65,19 @@ make test-smoke
 make test-networking
 ```
 
-Expected outcome: **19/19 tests pass**.
+Expected outcome: **19/19 tests pass** (smoke + networking).
+
+Add the observability stack for **29/29 tests**:
+
+```bash
+# 6. Install observability (Prometheus, Grafana, Loki, Tempo, OTel)
+make observability-install   # ~5-10 min on first run (image pulls)
+
+# 7. Run observability tests
+make test-observability
+```
+
+See [OBSERVABILITY.md](OBSERVABILITY.md) for how to use each component.
 
 ---
 
@@ -195,6 +207,30 @@ make prometheus   # port-forwards Prometheus to localhost:9090
 
 ---
 
+## Observability
+
+The observability stack runs in the `observability` namespace and includes five integrated components. See **[OBSERVABILITY.md](OBSERVABILITY.md)** for full usage documentation.
+
+| Component | Role | Quick access |
+|---|---|---|
+| Prometheus | Metrics scraping and storage | `make prometheus` → http://localhost:9090 |
+| Grafana | Dashboards (metrics + logs + traces) | `make grafana` → http://localhost:3000 |
+| Hubble | Cilium network flow visibility | `make hubble-ui` → http://localhost:12000 |
+| Loki | Log aggregation (via Promtail) | Query via Grafana → Explore |
+| Tempo | Distributed trace storage | Query via Grafana → Explore |
+| OTel Collector | OTLP telemetry ingest pipeline | grpc: 4317, http: 4318 |
+
+```bash
+make observability-install   # install all components (~5-10 min)
+make test-observability       # verify all 5 components are healthy
+make grafana                  # port-forward Grafana to localhost:3000
+make prometheus               # port-forward Prometheus to localhost:9090
+```
+
+Grafana credentials: `admin` / `prom-operator`. All three datasources (Prometheus, Loki, Tempo) are pre-configured with cross-datasource linking enabled.
+
+---
+
 ## Component Management
 
 ```bash
@@ -235,7 +271,7 @@ make workloads-uninstall
 ```bash
 make test-smoke         # 10 tests: nodes, DNS, Cilium, hello-world, CRDs, PVC
 make test-networking    # 9 tests: DNS, intra/cross-namespace, network policy, Hubble
-make test-observability # Prometheus, Grafana, Loki, Tempo, OTel readiness
+make test-observability # 10 tests: Prometheus, Grafana, Loki, Tempo, OTel readiness
 make test-security      # cert-manager, Kyverno, External Secrets
 make test-all           # all of the above
 ```

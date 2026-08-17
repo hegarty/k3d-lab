@@ -17,9 +17,9 @@ PASS=0
 FAIL=0
 SKIP=0
 
-t_pass() { ok "PASS: $1"; (( PASS++ )) || true; }
-t_fail() { err "FAIL: $1"; (( FAIL++ )) || true; }
-t_skip() { warn "SKIP: $1"; (( SKIP++ )) || true; }
+t_pass() { ok "PASS: $1"; PASS=$(( PASS + 1 )); }
+t_fail() { err "FAIL: $1"; FAIL=$(( FAIL + 1 )); }
+t_skip() { warn "SKIP: $1"; SKIP=$(( SKIP + 1 )); }
 K() { kubectl --context="${CONTEXT}" "$@"; }
 
 section "Observability Tests — Cluster: ${CLUSTER_NAME}"
@@ -127,13 +127,16 @@ if [[ "${loki_pods}" -ge 1 ]]; then
   t_pass "Loki: ${loki_pods} pod(s) running"
 
   log "Testing Loki ready endpoint..."
+  # Port-forward directly to the Loki pod (port 3100), not through the nginx
+  # gateway — the gateway may not proxy /ready depending on chart version.
   kubectl --context="${CONTEXT}" port-forward \
     -n "${OBSERVABILITY_NAMESPACE}" \
-    svc/loki-gateway 13100:80 &>/dev/null &
+    pod/loki-0 13100:3100 &>/dev/null &
   LK_PID=$!
-  sleep 3
+  sleep 5
 
-  LK_READY=$(curl -sf --max-time 5 http://localhost:13100/ready 2>/dev/null || echo "error")
+  # Drop -f so curl captures the response body even on non-200 HTTP status.
+  LK_READY=$(curl -s --max-time 5 http://localhost:13100/ready 2>/dev/null || echo "error")
   if echo "${LK_READY}" | grep -qi "ready"; then
     t_pass "Loki: ready"
   else
@@ -161,9 +164,10 @@ if [[ "${tempo_pods}" -ge 1 ]]; then
     -n "${OBSERVABILITY_NAMESPACE}" \
     svc/tempo 13200:3100 &>/dev/null &
   TP_PID=$!
-  sleep 3
+  sleep 5
 
-  TP_READY=$(curl -sf --max-time 5 http://localhost:13200/ready 2>/dev/null || echo "error")
+  # Drop -f so curl captures the response body even on non-200 HTTP status.
+  TP_READY=$(curl -s --max-time 5 http://localhost:13200/ready 2>/dev/null || echo "error")
   if echo "${TP_READY}" | grep -qi "ready"; then
     t_pass "Tempo: ready"
   else

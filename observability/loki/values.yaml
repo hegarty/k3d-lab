@@ -39,6 +39,14 @@ loki:
   ruler:
     enable_api: true
 
+# Disable memcached caches — they're enabled by default in chart v6 but are
+# unnecessary for single binary local dev and add two extra StatefulSets.
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
 # Single binary mode — one StatefulSet for all components
 singleBinary:
   replicas: 1
@@ -92,7 +100,7 @@ monitoring:
     enabled: true
     alerting: true
   serviceMonitor:
-    enabled: false  # Enable after kube-prometheus-stack is installed
+    enabled: true   # kube-prometheus-stack is installed first in observability-install
   selfMonitoring:
     enabled: false
     grafanaAgent:

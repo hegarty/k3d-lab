@@ -34,7 +34,7 @@ helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheu
   --namespace "${OBSERVABILITY_NAMESPACE}" \
   --values "${REPO_ROOT}/observability/kube-prometheus-stack/values.yaml" \
   --set grafana.adminPassword="${GRAFANA_ADMIN_PASSWORD:-prom-operator}" \
-  --timeout 10m \
+  --timeout 20m \
   --wait
 
 ok "kube-prometheus-stack installed"
@@ -43,7 +43,7 @@ ok "kube-prometheus-stack installed"
 # Wait for components
 ##############################################################################
 wait_for_rollout "${OBSERVABILITY_NAMESPACE}" deployment/kube-prometheus-stack-grafana 300
-wait_for_rollout "${OBSERVABILITY_NAMESPACE}" deployment/kube-prometheus-stack-prometheus-operator 180
+wait_for_rollout "${OBSERVABILITY_NAMESPACE}" deployment/kube-prometheus-stack-operator 180
 
 section "kube-prometheus-stack Status"
 kubectl get pods -n "${OBSERVABILITY_NAMESPACE}"

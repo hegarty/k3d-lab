@@ -32,7 +32,7 @@ helm upgrade --install external-secrets external-secrets/external-secrets \
   --version "${EXTERNAL_SECRETS_VERSION}" \
   --namespace "${EXTERNAL_SECRETS_NAMESPACE}" \
   --values "${REPO_ROOT}/security/external-secrets/values.yaml" \
-  --timeout 5m \
+  --timeout 10m \
   --wait
 
 ok "External Secrets Operator installed"

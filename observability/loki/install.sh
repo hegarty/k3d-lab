@@ -32,7 +32,7 @@ helm upgrade --install loki grafana/loki \
   --version "${LOKI_VERSION}" \
   --namespace "${OBSERVABILITY_NAMESPACE}" \
   --values "${REPO_ROOT}/observability/loki/values.yaml" \
-  --timeout 5m \
+  --timeout 10m \
   --wait
 
 ok "Loki installed"
@@ -48,7 +48,7 @@ helm upgrade --install promtail grafana/promtail \
   --set resources.requests.memory=32Mi \
   --set resources.limits.cpu=100m \
   --set resources.limits.memory=128Mi \
-  --timeout 3m \
+  --timeout 10m \
   --wait
 
 ok "Promtail DaemonSet installed"
