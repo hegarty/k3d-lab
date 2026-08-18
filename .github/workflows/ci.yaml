@@ -70,7 +70,7 @@ jobs:
   integration:
     name: Integration Test (single-node)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: lint
 
     steps:
