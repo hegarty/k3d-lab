@@ -16,9 +16,9 @@ PASS=0
 FAIL=0
 SKIP=0
 
-t_pass() { ok "PASS: $1"; (( PASS++ )) || true; }
-t_fail() { err "FAIL: $1"; (( FAIL++ )) || true; }
-t_skip() { warn "SKIP: $1"; (( SKIP++ )) || true; }
+t_pass() { ok "PASS: $1"; PASS=$(( PASS + 1 )); }
+t_fail() { err "FAIL: $1"; FAIL=$(( FAIL + 1 )); }
+t_skip() { warn "SKIP: $1"; SKIP=$(( SKIP + 1 )); }
 K() { kubectl --context="${CONTEXT}" "$@"; }
 
 section "Security Tests — Cluster: ${CLUSTER_NAME}"
@@ -111,7 +111,7 @@ section "Kyverno"
 KYVERNO_NS="${KYVERNO_NAMESPACE:-kyverno}"
 if K get namespace "${KYVERNO_NS}" &>/dev/null; then
   kyverno_pods=$(K get pods -n "${KYVERNO_NS}" \
-    -l "app.kubernetes.io/name=kyverno" \
+    -l "app.kubernetes.io/part-of=kyverno" \
     --field-selector=status.phase=Running --no-headers | wc -l | tr -d ' ')
 
   if [[ "${kyverno_pods}" -ge 1 ]]; then

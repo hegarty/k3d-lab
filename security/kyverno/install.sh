@@ -32,7 +32,7 @@ helm upgrade --install kyverno kyverno/kyverno \
   --version "${KYVERNO_VERSION}" \
   --namespace "${KYVERNO_NAMESPACE}" \
   --values "${REPO_ROOT}/security/kyverno/values.yaml" \
-  --timeout 5m \
+  --timeout 10m \
   --wait
 
 ok "Kyverno installed"

@@ -33,7 +33,7 @@ spec:
                 - cert-manager
       validate:
         message: >-
-          Image '{{ element.image }}' uses ':latest' tag or has no tag.
+          An image uses ':latest' tag or has no tag.
           Pin your image to a specific version or digest.
           Example: nginx:1.27.0-alpine instead of nginx:latest.
         foreach:
@@ -45,8 +45,9 @@ spec:
                     operator: Equals
                     value: "*:latest"
                   - key: "{{ element.image }}"
-                    operator: NotMatch
-                    value: "*:*"
+                    operator: NotIn
+                    value:
+                      - "?*:?*"
     - name: require-image-tag-init
       match:
         any:
@@ -62,7 +63,7 @@ spec:
                 - cert-manager
       validate:
         message: >-
-          Init container image '{{ element.image }}' uses ':latest' or has no tag.
+          An init container image uses ':latest' or has no tag.
         foreach:
           - list: "request.object.spec.initContainers"
             deny:
@@ -72,5 +73,6 @@ spec:
                     operator: Equals
                     value: "*:latest"
                   - key: "{{ element.image }}"
-                    operator: NotMatch
-                    value: "*:*"
+                    operator: NotIn
+                    value:
+                      - "?*:?*"

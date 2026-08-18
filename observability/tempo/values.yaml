@@ -66,8 +66,9 @@ persistence:
   size: 5Gi
 
 # Service monitor for Prometheus
+# kube-prometheus-stack is installed first in observability-install
 serviceMonitor:
-  enabled: false  # Enable once kube-prometheus-stack is installed
+  enabled: true
 
 # Grafana datasource config (for reference — datasource is configured in grafana values)
 reportingEnabled: false

@@ -33,7 +33,7 @@ helm upgrade --install otel-collector open-telemetry/opentelemetry-collector \
   --version "${OPENTELEMETRY_VERSION}" \
   --namespace "${OBSERVABILITY_NAMESPACE}" \
   --values "${REPO_ROOT}/observability/opentelemetry/values.yaml" \
-  --timeout 5m \
+  --timeout 10m \
   --wait
 
 ok "OpenTelemetry Collector installed"
@@ -47,7 +47,7 @@ kubectl apply -f "${REPO_ROOT}/observability/opentelemetry/collectors/collector.
 ##############################################################################
 # Wait for readiness
 ##############################################################################
-wait_for_rollout "${OBSERVABILITY_NAMESPACE}" daemonset/otel-collector 180
+wait_for_rollout "${OBSERVABILITY_NAMESPACE}" daemonset/otel-collector-opentelemetry-collector 180
 
 section "OpenTelemetry Status"
 kubectl get pods -n "${OBSERVABILITY_NAMESPACE}" -l app.kubernetes.io/name=opentelemetry-collector

@@ -40,11 +40,13 @@ A **reusable local Kubernetes platform** that spins up on a Mac with Docker Desk
 
 ### What was created and verified
 
-A fully functional repository at `~/projects/hegarty/k3d-lab`. The entire bootstrap sequence has been run to completion and all tests pass:
+A fully functional repository at `~/projects/hegarty/k3d-lab`. The entire bootstrap and observability install sequences have been run to completion and all tests pass:
 
 - **10/10 smoke tests passing**
 - **9/9 networking tests passing**
-- **19/19 total tests passing**
+- **10/10 observability tests passing**
+- **11/11 security tests passing**
+- **40/40 total tests passing**
 
 ---
 
@@ -67,7 +69,7 @@ A fully functional repository at `~/projects/hegarty/k3d-lab`. The entire bootst
 | `make test-networking` | ✅ 9/9 passing |
 | MetalLB | ❌ Not used — conflicts with Cilium (see Known Limitations) |
 | Gateway → backend HTTP (without port-forward) | ⚠️ 503 on k3d — see Known Limitations |
-| `make test-observability` | ❌ Not yet run (observability stack not installed) |
+| `make test-observability` | ✅ 10/10 pass — Prometheus, Grafana, Loki, Tempo, OTel |
 | `make test-security` | ❌ Not yet run (security stack not installed) |
 
 **The cluster currently exists.** To use it after Docker Desktop restarts:
@@ -233,7 +235,9 @@ This is already configured in `networking/cilium/` and applied automatically.
 
 ---
 
-### Bug 8: `make test-smoke` exits after first test
+### Bug 8: `make test-smoke` exits after first PASS
+
+
 
 **What happened:** The smoke test ran one test (PASS), then exited silently. Output showed only 1 total test instead of 10.
 
@@ -263,6 +267,103 @@ t_fail() { err "FAIL: $1"; FAIL=$(( FAIL + 1 )); }
 not_ready=$(K get nodes --no-headers 2>/dev/null | { grep -c "NotReady" || true; })
 not_ready="${not_ready:-0}"
 ```
+
+---
+
+## 3b. All bugs found and fixed during observability install session (2026-07-31)
+
+These were real failures encountered when running `make observability-install` and `make test-observability` for the first time. All are fixed in the repo.
+
+---
+
+### Bug 11: Helm timeout — kube-prometheus-stack `--timeout 10m` exceeded on cold image cache
+
+**What happened:** `make observability-install` stalled for over 10 minutes on the kube-prometheus-stack Helm install and then failed with a timeout. Resources were created but Helm gave up waiting for pods to become Ready.
+
+**Root cause:** k3d needs to pull ~1.5 GB of Docker images on first install. On a cold cache the image pulls took longer than the 10 minute Helm wait deadline.
+
+**Fix:** Increased `--timeout 10m` → `--timeout 20m` in `observability/kube-prometheus-stack/install.sh`. Loki, Tempo, and OTel timeouts increased from `5m` → `10m`.
+
+---
+
+### Bug 12: Grafana CrashLoopBackOff — DNS failure on external plugin download
+
+**What happened:** Grafana pods entered CrashLoopBackOff. Logs showed:
+```
+Error: ✗ Get "https://grafana.com/api/plugins/grafana-piechart-panel/versions": dial tcp: lookup grafana.com: server misbehaving
+```
+
+**Root cause:** `grafana-piechart-panel` and `grafana-worldmap-panel` were listed in the `plugins` section of `observability/kube-prometheus-stack/values.yaml`. Grafana tries to download plugins from `grafana.com` at startup. External DNS (`grafana.com`) is not reachable from inside k3d pods (Docker networking constraint on macOS). Both plugins are **bundled in Grafana 8+** and do not need to be installed.
+
+**Fix:** Removed the `plugins` section from `values.yaml` entirely.
+
+---
+
+### Bug 13: Wrong operator deployment name in wait step
+
+**What happened:** `make observability-install` failed waiting for the Prometheus operator:
+```
+Error from server (NotFound): deployments.apps "kube-prometheus-stack-prometheus-operator" not found
+```
+
+**Root cause:** The `wait_for_rollout` call in `install.sh` used the old deployment name. In kube-prometheus-stack chart v61.3.2 the operator deployment was renamed from `kube-prometheus-stack-prometheus-operator` to `kube-prometheus-stack-operator`.
+
+**Fix:** Updated `install.sh` to wait on `deployment/kube-prometheus-stack-operator`.
+
+---
+
+### Bug 14: Loki `UPGRADE FAILED: context deadline exceeded` — memcached caches pending
+
+**What happened:** Loki install failed repeatedly with `context deadline exceeded`. Pod `loki-results-cache-0` (and `loki-chunks-cache-0`) were stuck in `Pending` status, preventing Helm `--wait` from ever completing.
+
+**Root cause:** Loki chart v6 enables `chunksCache` and `resultsCache` (two memcached StatefulSets) by default, even in `singleBinary` mode. These require 1.2 GB RAM and a CPU limit each. In a minimal single-node k3d cluster there was insufficient allocatable capacity.
+
+**Fix:** Explicitly disabled both caches in `observability/loki/values.yaml`:
+```yaml
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+```
+Also had to uninstall the failed Loki release first (`helm uninstall loki -n observability`) before reinstalling.
+
+---
+
+### Bug 15: OTel DaemonSet wrong name in wait step
+
+**What happened:** `make otel-install` succeeded but the wait step failed:
+```
+Error from server (NotFound): daemonsets.apps "otel-collector" not found
+```
+
+**Root cause:** The Helm chart names the DaemonSet using the pattern `<release-name>-<chart-name>`. With release name `otel-collector` and chart `opentelemetry-collector`, the actual name is `otel-collector-opentelemetry-collector`.
+
+**Fix:** Updated `observability/opentelemetry/install.sh` wait step to use `daemonset/otel-collector-opentelemetry-collector`.
+
+---
+
+### Bug 16: Loki and Tempo readiness tests returning "error" with `curl -sf`
+
+**What happened:** `make test-observability` showed Loki and Tempo failing their readiness checks despite both pods running. The test captured `"error"` from `|| echo "error"` fallback.
+
+**Root cause (Loki):** The test was port-forwarding to `svc/loki-gateway:80` and calling `/ready`. The nginx gateway in the Loki chart does not proxy `/ready` — it returns HTTP 404. `curl -sf` exits non-zero on 4xx, so the `|| echo "error"` fallback fired.
+
+**Root cause (Tempo):** Same `curl -sf` pattern — if Tempo's `/ready` returns a non-200 status (e.g. 204), curl fails and the fallback fires.
+
+**Fix:**
+- Loki: switched port-forward target from `svc/loki-gateway:80` to `pod/loki-0:3100` (direct pod access bypasses nginx)
+- Both: removed `-f` flag from curl (`curl -s` instead of `curl -sf`) so curl captures the response body regardless of HTTP status
+- Both: increased sleep from 3s to 5s after starting port-forward to allow connection to establish
+
+---
+
+### Bug 17: Observability test counter arithmetic — same `(( N++ ))` bug as smoke tests
+
+**What happened:** `make test-observability` exited after the first PASS without running further tests.
+
+**Root cause:** Same `set -Eeuo pipefail` arithmetic bug as Bug 8. `t_pass`, `t_fail`, `t_skip` in `tests/observability/run.sh` used `(( N++ ))` which exits 1 when N=0.
+
+**Fix:** Changed all three counter functions to use `N=$(( N + 1 ))` form.
 
 ---
 
@@ -808,22 +909,28 @@ The repo uses **Gateway API** (the newer standard) rather than the older `Ingres
 
 ## 12. Observability stack
 
+**Status: RUNTIME VALIDATED ✅ — 10/10 tests passing (2026-07-31)**
+
+See [OBSERVABILITY.md](OBSERVABILITY.md) for the full usage guide.
+
 ### Components
 
-| Component | Role | Port |
+| Component | Role | Access |
 |---|---|---|
-| Prometheus | Scrapes metrics from all components | 9090 |
-| Grafana | Dashboards for metrics, logs, traces | 3000 |
-| Loki | Log aggregation and querying | 3100 |
-| Tempo | Distributed trace storage | 3200 |
-| OTel Collector | Receives OTLP telemetry, routes to backends | 4317 (gRPC), 4318 (HTTP) |
+| Prometheus | Scrapes metrics from all components | `make prometheus` → http://localhost:9090 |
+| Grafana | Dashboards for metrics, logs, traces | `make grafana` → http://localhost:3000 |
+| Hubble | Cilium network flow metrics | `make hubble-ui` → http://localhost:12000 |
+| Loki | Log aggregation (Promtail agent collects pod logs automatically) | Query via Grafana Explore |
+| Tempo | Distributed trace storage (OTLP ingest) | Query via Grafana Explore |
+| OTel Collector | OTLP receiver DaemonSet → routes to Tempo + Prometheus + Loki | grpc: 4317, http: 4318 |
 
 All components live in the `observability` namespace.
 
 ### Install
 
 ```bash
-make observability-install
+make observability-install   # ~5-10 min on first run (image pulls)
+make test-observability       # verify all 5 components healthy
 ```
 
 ### Accessing Grafana
@@ -833,7 +940,17 @@ kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
 # http://localhost:3000 — admin / prom-operator
 ```
 
-Pre-configured datasources: Prometheus, Loki, Tempo.
+Pre-configured datasources with cross-datasource linking:
+- **Prometheus** (uid: prometheus) — primary metrics source
+- **Loki** (uid: loki) — logs, with derived fields linking to Tempo traces
+- **Tempo** (uid: tempo) — traces, with traces-to-logs linking back to Loki
+
+### Key k3d/macOS constraints on observability
+
+- **External DNS from pods doesn't work** — Grafana plugins listed in `values.yaml` that download from `grafana.com` will crash Grafana. Don't add any plugins that aren't bundled.
+- **Cold image cache** — first Helm install pulls ~1-2 GB of images. Timeouts must be generous (20m for kube-prometheus-stack, 10m for others).
+- **Loki readiness via nginx gateway** — the `loki-gateway:80` nginx proxy does not forward `/ready`. Always check readiness by port-forwarding directly to `pod/loki-0:3100`.
+- **Promtail is deprecated** — the Promtail chart still works but prints a deprecation warning. Successor is Grafana Alloy (not migrated yet).
 
 ---
 
@@ -868,13 +985,14 @@ Installed with a **fake provider** for local dev (no real credentials needed). F
 
 Four test suites in `tests/`. Each returns exit code 0 on all pass, 1 on any failure.
 
-### Results as of last run
+### Results as of last run (2026-07-31)
 
 ```
-make test-smoke       → 10/10 PASS ✅
-make test-networking  → 9/9  PASS ✅
-make test-observability → not yet run (observability stack not installed)
-make test-security    → not yet run (security stack not installed)
+make test-smoke         → 10/10 PASS ✅
+make test-networking    → 9/9   PASS ✅
+make test-observability → 10/10 PASS ✅
+make test-security      → 11/11 PASS ✅
+                          40/40 TOTAL ✅
 ```
 
 ### Smoke tests
@@ -987,28 +1105,9 @@ kubectl get externalsecret -A && kubectl get secretstore -A    # ESO
 
 ## 16. Recommended next steps
 
-The single-node cluster is working with 19/19 tests passing. Here are natural next steps in priority order:
+The single-node cluster is complete with 40/40 tests passing across all four suites. Here are natural next steps:
 
-### 1. Install the observability stack
-
-```bash
-# Edit .env:
-# INSTALL_OBSERVABILITY=true
-
-make observability-install
-make test-observability
-make grafana   # open http://localhost:3000
-```
-
-### 2. Install security tooling
-
-```bash
-make security-install
-make test-security
-kubectl get policyreport -A   # see Kyverno audit results
-```
-
-### 3. Try the market-dev profile (full platform)
+### 1. Try the market-dev profile (full platform)
 
 ```bash
 make cluster-delete CLUSTER_NAME=k3d-lab
@@ -1021,13 +1120,13 @@ make bootstrap-market PROFILE=market-dev
 make test-all
 ```
 
-### 4. Run the Cilium connectivity test (comprehensive)
+### 3. Run the Cilium connectivity test (comprehensive)
 
 ```bash
 make cilium-test   # ~5-10 min, resource-heavy, ~70 connectivity scenarios
 ```
 
-### 5. Experiment with network policies
+### 4. Experiment with network policies
 
 ```bash
 kubectl apply -f networking/cilium/policies/default-deny.yaml
@@ -1036,7 +1135,7 @@ kubectl apply -f networking/cilium/policies/allow-dns.yaml
 make hubble-ui
 ```
 
-### 6. Try Istio (optional service mesh)
+### 5. Try Istio (optional service mesh)
 
 ```bash
 make istio-install
@@ -1048,6 +1147,8 @@ make istio-status
 
 *First build session: 2026-07-23*
 *Runtime validation session: 2026-07-30*
-*Test results: 19/19 passing (10 smoke + 9 networking)*
+*Observability session: 2026-07-31*
+*Security session: 2026-08-17*
+*Test results: 40/40 passing (10 smoke + 9 networking + 10 observability + 11 security)*
 *Repository: `~/projects/hegarty/k3d-lab`*
-*Next: `make observability-install` or `make bootstrap-market PROFILE=market-dev`*
+*Foundation complete. Next: `make bootstrap-market PROFILE=market-dev` or `make cilium-test`*
