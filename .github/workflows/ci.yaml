@@ -123,7 +123,9 @@ jobs:
             --kubeconfig-update-default \
             --wait
           kubectl config use-context k3d-k3d-lab
-          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+          # Do NOT wait for nodes Ready here — nodes need Cilium CNI first.
+          # Cilium install.sh waits for nodes Ready after installing the CNI.
+          until kubectl get nodes &>/dev/null; do sleep 2; done
           kubectl get nodes
 
       - name: Install Cilium
