@@ -6,7 +6,7 @@
 # Apply allow-dns.yaml FIRST, then this policy.
 ---
 apiVersion: "cilium.io/v2"
-kind: CiliumClusterWideNetworkPolicy
+kind: CiliumClusterwideNetworkPolicy
 metadata:
   name: default-deny-all
 spec:
