@@ -67,17 +67,25 @@ make test-networking
 
 Expected outcome: **19/19 tests pass** (smoke + networking).
 
-Add the observability stack for **29/29 tests**:
+Add the full platform for **40/40 tests**:
 
 ```bash
 # 6. Install observability (Prometheus, Grafana, Loki, Tempo, OTel)
 make observability-install   # ~5-10 min on first run (image pulls)
-
-# 7. Run observability tests
 make test-observability
+
+# 7. Install security (cert-manager, Kyverno, External Secrets)
+make security-install
+make test-security
+
+# 8. Deploy the OTel demo — proves end-to-end observability
+bash workloads/otel-demo/install.sh
+kubectl port-forward -n otel-demo svc/frontend 8888:8080
+# open http://localhost:8888, click around, then check Grafana for traces + logs
 ```
 
-See [OBSERVABILITY.md](OBSERVABILITY.md) for how to use each component.
+- Platform reference: [OBSERVABILITY.md](OBSERVABILITY.md)
+- **Building a new service?** Start here: [docs/app-observability.md](docs/app-observability.md)
 
 ---
 

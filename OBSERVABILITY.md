@@ -2,6 +2,8 @@
 
 This document covers the five observability services running in the cluster, how to access each one, and how to instrument your own applications to send data to them.
 
+> **Building a new service?** Start with [docs/app-observability.md](docs/app-observability.md) — the engineer-facing standards doc covering required labels, env vars, SDK setup, and a reference deployment manifest.
+
 > **Prerequisites:** Run `make observability-install` before using anything in this guide.
 > All services live in the `observability` namespace.
 
