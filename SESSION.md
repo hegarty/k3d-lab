@@ -1103,11 +1103,42 @@ kubectl get externalsecret -A && kubectl get secretstore -A    # ESO
 
 ---
 
+## 15b. OTel demo deployment session (2026-08-19)
+
+Deployed the `otel-demo` workload (frontend + productcatalogservice) and verified end-to-end observability: traces in Tempo, logs in Loki, cross-datasource linking working in Grafana.
+
+**Bugs found and fixed:**
+
+| # | Bug | Fix |
+|---|---|---|
+| 18 | `PRODUCT_CATALOG_PORT` wrong env var name | Renamed to `PRODUCT_CATALOG_SERVICE_PORT` (what the Go binary expects) |
+| 19 | Frontend Next.js binding to pod IP not `0.0.0.0` | Set `HOSTNAME=0.0.0.0` — server.js reads `process.env.HOSTNAME` as bind address; Kubernetes auto-sets this to pod name which resolves to pod IP, blocking `kubectl port-forward` |
+
+**New files:**
+
+- `workloads/otel-demo/install.sh` — deploy script with observability pre-flight check and readiness wait
+- `docs/app-observability.md` — engineer-facing standards: required labels, OTLP env vars, SDK setup (Go/Python/Node.js), ServiceMonitor pattern, structured logging format, reference deployment manifest, new service checklist
+
+**CI fixes (same session):**
+
+- `CiliumClusterWideNetworkPolicy` → `CiliumClusterwideNetworkPolicy` (wrong casing, CRD not found in CI)
+- Duplicate `operator:` key in `networking/cilium/values.yaml` silently dropped `replicas: 1`, causing CI to wait for 2 replicas and time out
+- Node readiness wait in CI moved to after Cilium install (same chicken-and-egg as Bug 3)
+- Security Helm timeouts `5m` → `10m` / `15m` (cold image pulls on GitHub Actions free tier)
+- CI job `timeout-minutes: 30` → `60`
+- CI integration job removed — linting only; integration tests run locally
+
+---
+
 ## 16. Recommended next steps
 
-The single-node cluster is complete with 40/40 tests passing across all four suites. Here are natural next steps:
+The single-node cluster is complete with 40/40 tests passing. OTel demo verified end-to-end. Here are natural next steps:
 
-### 1. Try the market-dev profile (full platform)
+### 1. Deploy a real service
+
+Use `docs/app-observability.md` as the checklist. The platform provides traces, logs, metrics, and network visibility automatically for any service that follows the standards.
+
+### 2. Try the market-dev profile (full platform)
 
 ```bash
 make cluster-delete CLUSTER_NAME=k3d-lab
@@ -1149,6 +1180,7 @@ make istio-status
 *Runtime validation session: 2026-07-30*
 *Observability session: 2026-07-31*
 *Security session: 2026-08-17*
+*OTel demo + app standards session: 2026-08-19*
 *Test results: 40/40 passing (10 smoke + 9 networking + 10 observability + 11 security)*
 *Repository: `~/projects/hegarty/k3d-lab`*
-*Foundation complete. Next: `make bootstrap-market PROFILE=market-dev` or `make cilium-test`*
+*Next: deploy a real service using `docs/app-observability.md` as the onboarding checklist*
